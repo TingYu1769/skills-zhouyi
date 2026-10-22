@@ -1,0 +1,52 @@
+% Zhouyi: Chinese setup for a translated arXiv source, compiled with XeLaTeX.
+% zhouyi_tex.py inserts this file right after \documentclass, passes no-math to fontspec on the
+% \documentclass line, and comments out the encoding and Type 1 font lines that do not work
+% with fontspec (see the font comment below).
+% scheme=plain adds CJK support without changing the original template's headings.
+\usepackage[UTF8,scheme=plain,fontset=none]{ctex}
+
+% A package may have set global font defaults (XCharter sets Extension=.otf), which would
+% turn the name lookups below into file lookups; start from clean defaults.
+\defaultfontfeatures{}
+
+% Latin text: keep the template's own fonts. Only when zhouyi_tex.py commented out a Type 1
+% font line (times, helvet, courier, mathptmx, tgtermes, tgheros, tgcursor, inconsolata, zlmtt,
+% or \rmdefault set to ptm and the like, also inside .cls and .sty files) does it define
+% \ZhouyiRm, \ZhouyiSf, \ZhouyiTt, \ZhouyiTtinconsolata or \ZhouyiTtlmmono, and the OpenType
+% equivalents are loaded by file name. The specific monospace fonts come last and win.
+\ifdefined\ZhouyiRm
+  \setmainfont{texgyretermes}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+    ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\fi
+\ifdefined\ZhouyiSf
+  \setsansfont{texgyreheros}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+    ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\fi
+\ifdefined\ZhouyiTt
+  \setmonofont{texgyrecursor}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+    ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\fi
+\ifdefined\ZhouyiTtinconsolata
+  \setmonofont{Inconsolatazi4}[Extension=.otf, UprightFont=*-Regular, BoldFont=*-Bold]
+\fi
+\ifdefined\ZhouyiTtlmmono
+  \setmonofont{lmmono10}[Extension=.otf, UprightFont=*-regular, ItalicFont=*-italic,
+    BoldFont=lmmonolt10-bold, BoldItalicFont=lmmonolt10-boldoblique]
+\fi
+
+% Chinese text: Noto CJK SC (Source Han), looked up through fontconfig.
+% CJK has no italic: emphasis in Chinese uses Kaiti when AR PL UKai is installed,
+% otherwise a slanted Song face.
+\IfFontExistsTF{AR PL UKai CN}
+  {\setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold,
+     ItalicFont=AR PL UKai CN, BoldItalicFont=AR PL UKai CN, BoldItalicFeatures={FakeBold=2}]}
+  {\setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold, AutoFakeSlant]}
+\setCJKsansfont{Noto Sans CJK SC}[BoldFont=Noto Sans CJK SC Bold, AutoFakeSlant]
+\setCJKmonofont{Noto Sans Mono CJK SC}
+
+% Chinese captions; the abstract title is bilingual like other headings; References stays English like the entries.
+\AtBeginDocument{%
+  \renewcommand{\figurename}{图}%
+  \renewcommand{\tablename}{表}%
+  \renewcommand{\abstractname}{摘要（Abstract）}%
+}

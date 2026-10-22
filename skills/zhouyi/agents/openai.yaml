@@ -1,0 +1,4 @@
+interface:
+  display_name: "周译 Zhouyi"
+  short_description: "将英文论文完整译成中文：有 arXiv 源码时编出中文 PDF，否则译成 Markdown 并截取原图"
+  default_prompt: "用 $zhouyi 将这篇英文论文完整翻译成中文：有同版本 arXiv 源码时编出中文 PDF，否则译成中文 Markdown，并整理原 PDF 与图表截图。"

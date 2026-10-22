@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+.zhouyi/
+.eval-work/
+.DS_Store
