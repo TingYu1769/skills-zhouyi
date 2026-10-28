@@ -146,6 +146,32 @@ class TexTest(unittest.TestCase):
         self.assertIn(flags, (build / "main.tex").read_text())
         self.assertEqual((work / "src/mystyle.cls").read_text(), cls)
 
+    def test_font_names_leave_package_lists_and_are_found_after_a_merge(self):
+        # ICLR templates load \usepackage{iclr2027_conference,times}: the template must stay.
+        main = ("\\documentclass{article}\n\\usepackage[final]{iclr2027_conference,times}\n"
+                "\\begin{document}\nText.\n\\end{document}\n")
+        sty = "\\RequirePackage{inconsolata,amsmath}\n\\RequirePackage{helvet,courier}\n\\RequirePackage{natbib,url}\n"
+        tarball = make_tarball(self.root / "list.tar.gz", {"main.tex": main, "iclr2027_conference.sty": sty})
+        work = self.root / "list-work"
+        zt.prepare(tarball, work)
+        build = work / "build"
+        changes = zt.patch_main(build, "main.tex")
+        self.assertIn("drop times from \\usepackage[final]{iclr2027_conference,times}", changes)
+        text = (build / "main.tex").read_text()
+        self.assertIn("\\usepackage[final]{iclr2027_conference} % zhouyi: dropped times\n", text)
+        self.assertEqual((build / "iclr2027_conference.sty").read_text(),
+                         "\\RequirePackage{amsmath} % zhouyi: dropped inconsolata\n"
+                         "% zhouyi: dropped helvet,courier: \\RequirePackage{helvet,courier}\n"
+                         "\\RequirePackage{natbib,url}\n")
+        flags = "\\def\\ZhouyiRm{}\\def\\ZhouyiSf{}\\def\\ZhouyiTt{}\\def\\ZhouyiTtinconsolata{}\\input{zh-setup.tex}"
+        self.assertIn(flags, text)
+        self.assertEqual(text.count("\n"), main.count("\n") + 1)
+        self.assertEqual(zt.patch_main(build, "main.tex"), [])
+        # Inconsolata is named only in the style file, which a merge leaves already patched.
+        shutil.copyfile(work / "src/main.tex", build / "main.tex")
+        zt.patch_main(build, "main.tex")
+        self.assertIn(flags, (build / "main.tex").read_text())
+
     def test_commented_headings_do_not_name_a_chunk(self):
         text = ("\\documentclass{article}\n\\begin{document}\nIntro text.\n"
                 "% \\section*{AI use statement}\n\\footnote{Corresponding author.}\n\\end{document}\n")

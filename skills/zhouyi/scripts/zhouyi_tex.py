@@ -39,6 +39,12 @@ FONT_PATCHES = [
     (r"\\renewcommand\*?\s*\{?\\sfdefault\}?\s*\{phv\}", "sf"),
     (r"\\renewcommand\*?\s*\{?\\ttdefault\}?\s*\{pcr\}", "tt"),
 ]
+# The same packages named inside a comma list, such as \usepackage{iclr2027_conference,times}:
+# commenting the line would also drop the template, so only these names leave the list.
+LISTED_FONTS = {"times": "rm sf tt", "mathptmx": "rm sf tt", "helvet": "sf", "tgheros": "sf",
+                "courier": "tt", "tgcursor": "tt", "tgtermes": "rm", "inconsolata": "ttinconsolata",
+                "zlmtt": "ttlmmono", "fontenc": "", "inputenc": ""}
+DROPPED = re.compile(rf"{re.escape(MARK)} dropped ([\w,.-]+)")
 NO_MATH = "\\PassOptionsToPackage{no-math}{fontspec}"
 
 
@@ -523,6 +529,22 @@ def patch_fonts(text: str, where: str, changes: list[str], families: set[str]) -
     """Comment out the font lines of FONT_PATCHES and collect the families zh-setup.tex must
     replace, counting lines an earlier build already commented out (merging rewrites only the
     files that hold chunks). Commenting keeps every line in place, so log line numbers still match."""
+    for m in DROPPED.finditer(text):  # package lists an earlier build already split
+        for name in m[1].split(","):
+            families.update(LISTED_FONTS.get(name, "").split())
+
+    def drop(m: re.Match) -> str:
+        names = [n.strip() for n in m[3].split(",")]
+        dropped = [n for n in names if n in LISTED_FONTS]
+        if not dropped:
+            return m[0]
+        kept = [n for n in names if n not in LISTED_FONTS]
+        changes.append(f"drop {','.join(dropped)} from {m[0].strip()}{where}")
+        for name in dropped:
+            families.update(LISTED_FONTS[name].split())
+        note = f"{MARK} dropped {','.join(dropped)}"
+        return f"{m[1]}{{{','.join(kept)}}}{m[4]} {note}" if kept else f"{note}: {m[0]}"
+    text = re.sub(rf"^(?!{re.escape(MARK)})([ \t]*{PKG})\{{([^{{}}\n]*,[^{{}}\n]*)\}}([^\n]*)", drop, text, flags=re.M)
     for pattern, replaces in FONT_PATCHES:
         if re.search(rf"^{re.escape(MARK)} [ \t]*{pattern}", text, re.M):
             families.update(replaces.split())
