@@ -1,4 +1,5 @@
 """Behavioral tests for the arXiv LaTeX source mode: unpacking, Chinese setup and XeLaTeX builds."""
+import hashlib
 import importlib.util
 import io
 import os
@@ -354,6 +355,30 @@ class TexTest(unittest.TestCase):
         self.assertFalse(summary["ok"])
         self.assertLessEqual(len(summary["reverted_this_run"]), 1)
         self.assertIn("stopped", summary)
+
+    @unittest.skipUnless(HAS_TEX, "set ZHOUYI_TEXBIN to a TeX Live bin directory")
+    def test_an_override_error_at_begin_document_reverts_nothing_and_retry_merges_again(self):
+        files = {**self.files, "local.sty": "\\ProvidesPackage{local}\n",
+                 "main.tex": MAIN.replace("\\usepackage{amsmath}", "\\usepackage{amsmath}\n\\usepackage{local}")}
+        self.tarball = make_tarball(self.root / "hook.src.tar.gz", files)
+        chunks, src = self.split()
+        for cid, text in src.items():
+            (self.work / f"chunks/{cid}.zh.tex").write_text(text)
+        front = chunks[0]["id"]
+        (self.work / "overrides").mkdir()
+        (self.work / "overrides/local.sty").write_text("\\ProvidesPackage{local}\n\\AtBeginDocument{\\undefinedinhook}\n")
+        summary = zt.build(self.work, None, TEXBIN)
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["reverted_this_run"], [])  # the error sits on \begin{document}, inside the front chunk
+        self.assertIn("did not change", summary["stopped"])
+        # An older run reverted the front chunk for that error; once the override is fixed, retry it.
+        (self.work / "overrides/local.sty").write_text("\\ProvidesPackage{local}\n")  # the override, fixed
+        digest = hashlib.sha256((self.work / f"chunks/{front}.zh.tex").read_bytes()).hexdigest()
+        zt.write_json(self.work / "chunks/reverted.json", {front: digest})
+        self.assertNotIn(front, zt.build(self.work, None, TEXBIN)["merge"]["merged"])
+        summary = zt.build(self.work, None, TEXBIN, retry_reverted=True)
+        self.assertTrue(summary["ok"], summary)
+        self.assertIn(front, summary["merge"]["merged"])
 
     @unittest.skipUnless(HAS_TEX, "set ZHOUYI_TEXBIN to a TeX Live bin directory")
     def test_deliver_and_check_follow_the_review_records(self):

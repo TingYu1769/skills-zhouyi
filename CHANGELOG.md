@@ -9,6 +9,7 @@
 - 源码模式：切块时跳过注释里的 `\begin`/`\end`；以前表格里一句注释掉的 `% \begin{tabular}` 会让切块报错 “No \end{tabular}”。
 - 源码模式：`tex-split` 记下 `W/src/` 各文件的哈希，`tex-merge` 发现切块后源码被改就报错；以前会按旧位置合并，悄悄吞掉或重复文字，编译照常通过。
 - 源码模式：主文件在子目录（如 `texFiles/arxiv.tex`）时，`tex-build` 到 `W/build/` 下找 PDF 和日志；以前去子目录里找，编译成功也报失败。
+- 源码模式：报错行与源码原文一字不差、又不含中文时，`tex-build` 不再退回它所在的块，而是停下交给 agent；以前 overrides 在 `\begin{document}` 处出错，会把首块误退回英文。新增 `tex-build --retry-reverted`，误判修好后重新合并被退回的块。
 - 源码模式：`tex-prepare` 新增 `--main`，源码包有多个顶层文档时指定主文件；找不到主文件时清理已解包的目录，便于重试。
 
 ## 0.1.0（2026-10-22）

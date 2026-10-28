@@ -187,6 +187,7 @@ ENV_ARGS = {"minipage": 1, "wrapfigure": 2, "subfigure": 1, "tcolorbox": 0, "alg
 # Commands that may only appear in the preamble region's translatable arguments.
 FRONT_TEXT = ("title", "thanks")
 PLACEHOLDER = re.compile(r"⟦P(\d+)⟧")
+CJK = re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
 
 
 def skip_group(text: str, i: int, open_c: str = "{", close_c: str = "}") -> int:
@@ -682,14 +683,30 @@ def revert(work_dir: Path, cid: str, error: dict) -> None:
     write_json(work_dir / "progress.json", progress)
 
 
-def build(work_dir: Path, output: Path | None = None, texbin: Path | None = None, rounds: int = 5) -> dict:
+def untouched_line(work_dir: Path, error: dict) -> bool:
+    """Whether the failing line reads exactly as in the source and holds no Chinese: the translation
+    did not write it, so the error comes from elsewhere (the preamble, W/overrides/, a hook run at
+    \\begin{document} or \\maketitle) and reverting the chunk around it would not help."""
+    built, source = work_dir / "build" / error["file"], work_dir / "src" / error["file"]
+    if not built.is_file() or not source.is_file():
+        return False
+    lines = read_text(built).splitlines()
+    line = lines[error["line"] - 1].strip() if 0 < error["line"] <= len(lines) else ""
+    return bool(line) and not CJK.search(line) and line in {l.strip() for l in read_text(source).splitlines()}
+
+
+def build(work_dir: Path, output: Path | None = None, texbin: Path | None = None, rounds: int = 5,
+          retry_reverted: bool = False) -> dict:
     """Merge translated chunks, add Chinese support and compile; a chunk that breaks the build falls
-    back to English, at most `rounds` times. Errors that cannot be traced to a chunk stop the loop."""
+    back to English, at most `rounds` times. Errors that cannot be traced to a chunk stop the loop.
+    `retry_reverted` merges reverted chunks again, after a revert turned out to be a misattribution."""
     work_dir = Path(work_dir)
     record = read_json(work_dir / "tex.json")
     root, main = work_dir / "build", record["main"]
     has_chunks = (work_dir / "chunks" / "index.json").is_file()
     reverted_now, merged = [], None
+    if retry_reverted:
+        (work_dir / "chunks" / "reverted.json").unlink(missing_ok=True)
     for attempt in range(rounds + 1):
         if has_chunks:
             merged = merge(work_dir)
@@ -704,6 +721,11 @@ def build(work_dir: Path, output: Path | None = None, texbin: Path | None = None
         if cid is None or cid not in merged["merged"]:
             # Only a translated chunk can be reverted; anything else needs a human look.
             summary["stopped"] = "error outside translated text or without file:line; fix it by hand"
+            break
+        if untouched_line(work_dir, error):
+            summary["stopped"] = (f"error on a line the translation did not change ({error['file']}:{error['line']}, "
+                                  f"inside chunk {cid}); it likely comes from the preamble, W/overrides/ or a hook; "
+                                  "fix it by hand")
             break
         if attempt == rounds:
             summary["stopped"] = f"still failing after reverting {rounds} chunks"
@@ -799,6 +821,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path)
     p.add_argument("--texbin", type=Path, help="Directory holding latexmk and xelatex")
     p.add_argument("--rounds", type=int, default=5, help="Most chunks to revert to English in one run")
+    p.add_argument("--retry-reverted", action="store_true",
+                   help="Merge reverted chunks again, once the error behind a revert has been fixed elsewhere")
     for command in ("tex-deliver", "tex-check"):
         p = sub.add_parser(command, help="Copy the PDF and Chinese project into the paper directory"
                            if command == "tex-deliver" else "Check the delivery and review records")
@@ -827,7 +851,7 @@ def main() -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["files_ok"] else 1
         else:
-            result = build(args.work_dir, args.out, args.texbin, args.rounds)
+            result = build(args.work_dir, args.out, args.texbin, args.rounds, args.retry_reverted)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok", True) else 1
     except (TexError, OSError, ValueError, tarfile.TarError, subprocess.TimeoutExpired) as exc:
