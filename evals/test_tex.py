@@ -172,6 +172,20 @@ class TexTest(unittest.TestCase):
         zt.patch_main(build, "main.tex")
         self.assertIn(flags, (build / "main.tex").read_text())
 
+    def test_main_file_can_be_named_when_the_package_holds_two_documents(self):
+        files = {**self.files, "rebuttal.tex": "\\documentclass{article}\n\\begin{document}\nReply.\n\\end{document}\n"}
+        tarball = make_tarball(self.root / "two.tar.gz", files)
+        work = self.root / "two-work"
+        with self.assertRaisesRegex(zt.TexError, "--main"):
+            zt.prepare(tarball, work)
+        self.assertFalse((work / "src").exists() or (work / "build").exists())
+        record = zt.prepare(tarball, work, "main.tex")
+        self.assertEqual(record["tex_files"], ["main.tex", "sections/intro.tex"])
+        with self.assertRaisesRegex(zt.TexError, "prepared with main.tex"):
+            zt.prepare(tarball, work, "rebuttal.tex")
+        with self.assertRaisesRegex(zt.TexError, "not in the source package"):
+            zt.prepare(tarball, self.root / "other-work", "missing.tex")
+
     def test_deliver_includes_override_files_the_source_lacks(self):
         zt.prepare(self.tarball, self.work)
         zt.patch_main(self.work / "build", "main.tex")

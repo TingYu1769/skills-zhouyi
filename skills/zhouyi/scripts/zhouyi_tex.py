@@ -72,7 +72,11 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="surrogateescape")
 
 
-def find_main(root: Path) -> str:
+def find_main(root: Path, main: str | None = None) -> str:
+    if main:
+        if not (root / main).is_file():
+            raise TexError(f"{main} is not in the source package")
+        return main
     readme = root / "00README.json"
     if readme.is_file():
         for item in json.loads(readme.read_text(encoding="utf-8")).get("sources", []):
@@ -80,7 +84,8 @@ def find_main(root: Path) -> str:
                 return item["filename"]
     candidates = [p.name for p in root.glob("*.tex") if re.search(r"^\s*\\documentclass", read_text(p), re.M)]
     if len(candidates) != 1:
-        raise TexError(f"Cannot pick the main file among {candidates or 'no .tex files'}; check 00README.json")
+        raise TexError(f"Cannot pick the main file among {candidates or 'no .tex files'}; "
+                       "check 00README.json or pass --main")
     return candidates[0]
 
 
@@ -115,8 +120,9 @@ def init_progress(work_dir: Path, record: dict) -> None:
         })
 
 
-def prepare(tarball: Path, work_dir: Path) -> dict:
-    """Unpack into W/src (kept as delivered) and W/build (working copy); record the main file."""
+def prepare(tarball: Path, work_dir: Path, main: str | None = None) -> dict:
+    """Unpack into W/src (kept as delivered) and W/build (working copy); record the main file,
+    named by `main` when the package holds several top-level documents."""
     tarball, work_dir = Path(tarball), Path(work_dir)
     digest = sha256(tarball)
     record_path = work_dir / "tex.json"
@@ -124,6 +130,8 @@ def prepare(tarball: Path, work_dir: Path) -> dict:
         record = json.loads(record_path.read_text(encoding="utf-8"))
         if record.get("source_sha256") != digest:
             raise TexError("Source package differs from the saved record; use a new work directory")
+        if main and record["main"] != main:
+            raise TexError(f"This work directory was prepared with {record['main']}; use a new one")
         init_progress(work_dir, record)
         return record
     src, build = work_dir / "src", work_dir / "build"
@@ -136,7 +144,12 @@ def prepare(tarball: Path, work_dir: Path) -> dict:
                 raise TexError(f"Unsafe path in source package: {member.name}")
         archive.extractall(src, filter="data")
     shutil.copytree(src, build)
-    main = find_main(src)
+    try:
+        main = find_main(src, main)
+    except TexError:
+        shutil.rmtree(src)  # leave nothing behind, so the retry with --main can unpack again
+        shutil.rmtree(build)
+        raise
     record = {"source_sha256": digest, "source_file": tarball.name, "main": main,
               "tex_files": tex_files(src, main)}
     write_json(record_path, record)
@@ -761,6 +774,8 @@ def parser() -> argparse.ArgumentParser:
     p = sub.add_parser("tex-prepare", help="Unpack an arXiv source package into W/src and W/build")
     p.add_argument("tarball", type=Path)
     p.add_argument("--work-dir", required=True, type=Path)
+    p.add_argument("--main", help="Main .tex file, relative to the package root, when the package "
+                   "holds several top-level documents")
     p = sub.add_parser("tex-split", help="Cut the source into per-section chunks with ⟦Pn⟧ placeholders")
     p.add_argument("--work-dir", required=True, type=Path)
     p.add_argument("--max-chars", type=int, default=14000,
@@ -786,7 +801,7 @@ def main() -> int:
     args = parser().parse_args()
     try:
         if args.command == "tex-prepare":
-            result = prepare(args.tarball, args.work_dir)
+            result = prepare(args.tarball, args.work_dir, args.main)
         elif args.command == "tex-split":
             result = split(args.work_dir, args.max_chars)
         elif args.command == "tex-merge":
