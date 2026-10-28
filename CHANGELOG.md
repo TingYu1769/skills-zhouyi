@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 0.2.0（2026-10-28）
+
 源码模式的改动：
 
 - 切块识别论文自己定义的 verbatim 类环境（`\lstnewenvironment`、`\newtcblisting`、`\DefineVerbatimEnvironment`、`\newminted` 等）并整段保留，verbatim 环境到第一个字面的 `\end` 为止，`\verb`、`\lstinline` 等的参数也整段保留。以前提示词框里的 `$(nproc)` 会被当成公式开头，吞掉大段正文。
