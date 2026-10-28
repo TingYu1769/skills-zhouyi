@@ -708,8 +708,11 @@ def deliver(paper_dir: Path, work_dir: Path, pdf_name: str | None = None, tex_di
         if not (target / "zh-setup.tex").is_file():
             raise TexError(f"{target} exists and was not written by zhouyi; move it first")
         shutil.rmtree(target)
-    src, build_dir = work_dir / "src", work_dir / "build"
-    files = [p.relative_to(src) for p in src.rglob("*") if p.is_file()] + [Path("zh-setup.tex")]
+    src, build_dir, overrides = work_dir / "src", work_dir / "build", work_dir / "overrides"
+    files = {p.relative_to(src) for p in src.rglob("*") if p.is_file()}
+    if overrides.is_dir():  # also files the source lacks, such as a local stub for a font package
+        files |= {p.relative_to(overrides) for p in overrides.rglob("*") if p.is_file()}
+    files = sorted(files) + [Path("zh-setup.tex")]
     for rel in files:
         (target / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(build_dir / rel, target / rel)

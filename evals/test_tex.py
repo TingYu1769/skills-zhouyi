@@ -172,6 +172,25 @@ class TexTest(unittest.TestCase):
         zt.patch_main(build, "main.tex")
         self.assertIn(flags, (build / "main.tex").read_text())
 
+    def test_deliver_includes_override_files_the_source_lacks(self):
+        zt.prepare(self.tarball, self.work)
+        zt.patch_main(self.work / "build", "main.tex")
+        (self.work / "overrides/fonts").mkdir(parents=True)
+        (self.work / "overrides/times.sty").write_text("% local stub\n")
+        (self.work / "overrides/fonts/extra.sty").write_text("% nested\n")
+        (self.work / "overrides/main.tex").write_text((self.work / "build/main.tex").read_text() + "% fixed\n")
+        zt.apply_overrides(self.work)
+        pdf = self.work / "main.pdf"
+        pdf.write_bytes(b"%PDF-1.5\n")
+        zt.write_json(self.work / "build-summary.json", {"ok": True, "pdf": str(pdf)})
+        paper = self.root / "2601_arXiv_Example"
+        paper.mkdir()
+        delivered = zt.deliver(paper, self.work)
+        self.assertEqual((paper / "zh-tex/times.sty").read_text(), "% local stub\n")
+        self.assertEqual((paper / "zh-tex/fonts/extra.sty").read_text(), "% nested\n")
+        self.assertTrue((paper / "zh-tex/main.tex").read_text().endswith("% fixed\n"))
+        self.assertEqual(delivered["files"], 6)  # three source files, two new ones, zh-setup.tex
+
     def test_commented_headings_do_not_name_a_chunk(self):
         text = ("\\documentclass{article}\n\\begin{document}\nIntro text.\n"
                 "% \\section*{AI use statement}\n\\footnote{Corresponding author.}\n\\end{document}\n")

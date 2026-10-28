@@ -5,6 +5,7 @@
 ## 未发布
 
 - 源码模式：字体包写在逗号列表里时（如 `\usepackage{iclr2027_conference,times}`），只从列表中去掉字体包并在行尾注明，不再漏掉；以前英文底稿会退回 Latin Modern。
+- 源码模式：`tex-deliver` 把 `W/overrides/` 里源码没有的文件也放进 `zh-tex/`，交付的工程可以单独重编。
 
 ## 0.1.0（2026-10-22）
 

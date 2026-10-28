@@ -24,7 +24,7 @@ arXiv 源码地址是 `https://arxiv.org/e-print/<编号>v<版本>`，返回 `.t
 6. `zhouyi_tex.py tex-build --work-dir W`：合并后编译。某块的译文导致编译失败时，脚本把这一块退回英文重编，该节改回 `pending`，并在 `issues` 里开一条记录；失败的译稿留在原处，修好后再编译会自动重新合并。报错落在译文之外，或者没有文件和行号时，脚本停下，交给 agent 处理。
 7. 版面核对：用 `zhouyi.py render` 渲染全部页面，`zhouyi.py sheet --per 4` 拼图查看。逐张确认：没有缺字方框，标题、图表和表注位置正常，表格没有溢出栏宽，参考文献已生成，强调用的楷体正常显示。`build-summary.json` 里的 `missing_characters` 必须为 0，`undefined_references`、`overfull_over_20pt`（横向溢出）和 `overfull_vbox_over_20pt`（文本框、表格越过页底）逐条看过。
 8. 核对只做一遍：每块写完后随即逐段对照原文核对（这时原文还在上下文里，标准同 [验收与恢复](verification.md)），发现问题当场改，之后不再整块重读原文和译文。全部合并编译后，只看 `tex-merge` 的结果、编译摘要和版面拼图，再抽查几段；没有问题时将各节设为 `verified`，疑点记入 `issues`，版面核对和抽查范围写进 `document_review`。用子代理时，逐段核对由子代理在本批完成并回报，主 agent 每批抽查一两段。不要在最后把全文再完整重读一遍：每轮请求都会重发上下文，整篇重读会让花费成倍增加，逐块写完即核对已经覆盖了这一步。
-9. `zhouyi_tex.py tex-deliver <论文目录> --work-dir W` 复制 `<论文目录名>.zh.pdf` 和 `zh-tex/`；`zhouyi_tex.py tex-check <论文目录> --work-dir W` 返回 `ready: true` 后交付。
+9. `zhouyi_tex.py tex-deliver <论文目录> --work-dir W` 复制 `<论文目录名>.zh.pdf` 和 `zh-tex/`，`zh-tex/` 含源码的全部文件、`W/overrides/` 中的文件（包括源码里没有的，如本地字体包替身）和 `zh-setup.tex`；`zhouyi_tex.py tex-check <论文目录> --work-dir W` 返回 `ready: true` 后交付。
 
 ## 块说明（翻译每一块时遵守；用子代理时原样交给它）
 
