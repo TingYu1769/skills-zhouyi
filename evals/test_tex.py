@@ -386,6 +386,20 @@ class TexTest(unittest.TestCase):
         self.assertEqual(delivered["files"], 5)
 
     @unittest.skipUnless(HAS_TEX, "set ZHOUYI_TEXBIN to a TeX Live bin directory")
+    def test_build_finds_the_pdf_of_a_main_file_in_a_subdirectory(self):
+        readme = '{"sources": [{"filename": "texFiles/arxiv.tex", "usage": "toplevel"}]}'
+        files = {"texFiles/arxiv.tex": MAIN, "sections/intro.tex": INTRO, "refs.bib": BIB, "00README.json": readme}
+        self.tarball = make_tarball(self.root / "subdir.src.tar.gz", files)
+        chunks, src = self.split()
+        self.assertEqual(zt.read_json(self.work / "tex.json")["main"], "texFiles/arxiv.tex")
+        for cid, text in src.items():
+            (self.work / f"chunks/{cid}.zh.tex").write_text(text)
+        summary = zt.build(self.work, None, TEXBIN)
+        self.assertTrue(summary["ok"], summary)
+        self.assertEqual(Path(summary["pdf"]), self.work / "build/arxiv.pdf")
+        self.assertEqual(summary["undefined_references"], 0)
+
+    @unittest.skipUnless(HAS_TEX, "set ZHOUYI_TEXBIN to a TeX Live bin directory")
     def test_a_stale_failed_log_is_not_read_as_this_build(self):
         zt.prepare(self.tarball, self.work)
         (self.work / "build/main.log").write_text("./sections/intro.tex:2: Undefined control sequence.\n")

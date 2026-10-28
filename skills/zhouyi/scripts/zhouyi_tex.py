@@ -643,18 +643,21 @@ def compile_once(root: Path, main: str, texbin: Path | None) -> dict:
     # -g: always rebuild; otherwise latexmk keeps reporting an old failure after the environment changes.
     cmd = [tex_bin("latexmk", texbin), "-g", "-xelatex", "-interaction=nonstopmode", "-file-line-error",
            "-halt-on-error", main]
-    log_path = root / Path(main).with_suffix(".log")
+    # latexmk runs in W/build, so the PDF, log and auxiliary files land there under the main file's
+    # name even when the main file sits in a subdirectory such as texFiles/arxiv.tex.
+    stem = Path(main).stem
+    log_path = root / f"{stem}.log"
     # A failed run can leave a truncated .aux; BibTeX then stops before XeLaTeX runs and the old log
     # would be read as this run's result. Start each compile without the old log and auxiliary files.
     for suffix in (".log", ".aux", ".bbl", ".blg", ".fdb_latexmk", ".fls", ".xdv"):
-        name = Path(main).with_suffix(suffix)
+        name = f"{stem}{suffix}"
         if suffix == ".bbl" and (root.parent / "src" / name).is_file():
             continue  # a .bbl shipped in the source package is the bibliography itself
         root.joinpath(name).unlink(missing_ok=True)
     # latexmk can echo non-UTF-8 bytes from the TeX log; decode leniently instead of crashing.
     run = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, errors="replace", timeout=1800)
     summary = summarize_log(log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else run.stdout)
-    pdf = root / Path(main).with_suffix(".pdf")
+    pdf = root / f"{stem}.pdf"
     summary.update(ok=run.returncode == 0 and pdf.is_file(), returncode=run.returncode,
                    pdf=str(pdf) if pdf.is_file() else "")
     return summary
