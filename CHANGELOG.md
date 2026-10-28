@@ -4,17 +4,18 @@
 
 ## 未发布
 
-- 源码模式：字体包写在逗号列表里时（如 `\usepackage{iclr2027_conference,times}`），只从列表中去掉字体包并在行尾注明，不再漏掉；以前英文底稿会退回 Latin Modern。
-- 源码模式：`tex-deliver` 把 `W/overrides/` 里源码没有的文件也放进 `zh-tex/`，交付的工程可以单独重编。
-- 源码模式：切块时跳过注释里的 `\begin`/`\end`；以前表格里一句注释掉的 `% \begin{tabular}` 会让切块报错 “No \end{tabular}”。
-- 源码模式：`tex-split` 记下 `W/src/` 各文件的哈希，`tex-merge` 发现切块后源码被改就报错；以前会按旧位置合并，悄悄吞掉或重复文字，编译照常通过。
-- 源码模式：主文件在子目录（如 `texFiles/arxiv.tex`）时，`tex-build` 到 `W/build/` 下找 PDF 和日志；以前去子目录里找，编译成功也报失败。
-- 源码模式：报错行与源码原文一字不差、又不含中文时，`tex-build` 不再退回它所在的块，而是停下交给 agent；以前 overrides 在 `\begin{document}` 处出错，会把首块误退回英文。新增 `tex-build --retry-reverted`，误判修好后重新合并被退回的块。
-- 源码模式：从 `W/overrides/` 删掉的文件，下次合并时在 `W/build/` 里恢复成源码原样（源码没有的就删除）；以前旧的覆盖文件会一直留在 `W/build/` 里起作用。
-- 源码模式：识别论文自己定义的 verbatim 类环境（`\lstnewenvironment`、`\newtcblisting`、`\DefineVerbatimEnvironment`、`\newminted` 等）并整段保留，verbatim 环境到第一个字面 `\end` 为止；`\verb`、`\lstinline` 等行内 verbatim 不再触发公式配对；`$` 跨空行未闭合时报错并给出行号；新增 `tex-split --verbatim-env`，切块输出新增 `verbatim_envs` 和 `kept_prose`。以前提示词框里的 `$(nproc)` 会被当成公式开头，吞掉大段正文。
-- 源码模式：新切的块，合并检查要求占位符外的花括号与原文块一样配平，原文块本身不配平（如代码片段）时照抄也能合并；花括号按反斜杠奇偶计数，`\\{` 里的花括号不再算作已转义。已切块的工作目录仍用原规则。
-- 源码模式：切块不在花括号组里切开，组内开始的节并入前一块；以前 `\hypertarget{x}{\section{..}..}` 会被切成两个不配平的块，两块都过不了合并检查。
-- 源码模式：`tex-prepare` 新增 `--main`，源码包有多个顶层文档时指定主文件；找不到主文件时清理已解包的目录，便于重试。
+源码模式的改动：
+
+- 切块识别论文自己定义的 verbatim 类环境（`\lstnewenvironment`、`\newtcblisting`、`\DefineVerbatimEnvironment`、`\newminted` 等）并整段保留，verbatim 环境到第一个字面的 `\end` 为止，`\verb`、`\lstinline` 等的参数也整段保留。以前提示词框里的 `$(nproc)` 会被当成公式开头，吞掉大段正文。
+- `$` 到下一个空行前都没闭合时，切块报错并给出行号。新增 `tex-split --verbatim-env`，切块输出新增 `verbatim_envs`、`kept_prose` 和 `warnings`。
+- 切块不在花括号组里切开，组内开始的节并入前一块；注释里的 `\begin`/`\end` 不再参与配对。以前 `\hypertarget{x}{\section{..}..}` 会切出两个不配平的块，一句注释掉的 `% \begin{tabular}` 会让切块报错。
+- 新切的块，合并检查要求占位符外的花括号与原文块一样配平，花括号按反斜杠奇偶计数；已切块的工作目录沿用原规则。
+- `tex-split` 记下 `W/src/` 各文件的哈希，切块后源码被改动时 `tex-merge` 报错。以前会按旧位置合并，悄悄吞掉或重复文字，编译照常通过。
+- 逗号列表里的字体包（如 `\usepackage{iclr2027_conference,times}`）也会被替换，同一行的其他宏包照常加载。以前英文底稿会退回 Latin Modern。
+- 报错行与源码原文一字不差且不含中文时，`tex-build` 停下交给 agent，不再退回它所在的块；新增 `tex-build --retry-reverted`，误判修好后重新合并退回的块。以前 override 在 `\begin{document}` 处出错，会把首块误退回英文。
+- 主文件在子目录（如 `texFiles/arxiv.tex`）时，`tex-build` 能找到 PDF 和日志。
+- 从 `W/overrides/` 删掉的文件，下次合并时恢复成源码原样；`tex-deliver` 把 override 里源码没有的文件也放进 `zh-tex/`。
+- `tex-prepare` 新增 `--main`，源码包有多个顶层文档时指定主文件；找不到主文件时不留下解包目录。
 
 ## 0.1.0（2026-10-22）
 

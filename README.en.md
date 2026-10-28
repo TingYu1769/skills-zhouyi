@@ -29,7 +29,7 @@ Zhouyi (`zhouyi`) is an [Agent Skill](https://agentskills.io) for translating co
 | How | Translates the source chunk by chunk, with equations, commands, and citations protected by placeholders, then rebuilds with XeLaTeX | Translates section by section from the PDF and crops figures and tables from the original pages, checking every image |
 | Output | A Chinese PDF in the original layout, plus a recompilable Chinese TeX project | Chinese Markdown, the original PDF, and an `assets/` image folder, optionally zipped |
 
-Source mode reuses the paper's own image files and lets LaTeX typeset tables and equations as before; table cells stay in English while captions are translated. For arXiv preprints the agent downloads the source matching the version stamped on the PDF's first page and falls back to PDF mode when it cannot.
+Source mode reuses the paper's own image files and lets LaTeX typeset tables and equations as before; table cells and the contents of prompt and code boxes stay as in the original, while captions are translated. For arXiv preprints the agent downloads the source matching the version stamped on the PDF's first page and falls back to PDF mode when it cannot.
 
 ## First run: check the environment
 
