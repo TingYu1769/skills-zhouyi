@@ -531,7 +531,8 @@ def split(work_dir: Path, max_chars: int = 14000, verbatim_envs: list[str] | tup
     # Chunk offsets point into W/src as it is now; merge refuses to run if a file changes later.
     hashes = {rel: sha256(src / rel) for rel in record["tex_files"]}
     write_json(out / "index.json", {"source_sha256": record["source_sha256"], "src_sha256": hashes,
-                                    "verbatim_envs": own, "kept_prose": kept_prose, "chunks": index})
+                                    "brace_rule": "source", "verbatim_envs": own, "kept_prose": kept_prose,
+                                    "chunks": index})
     progress = read_json(work_dir / "progress.json")
     known = {s.get("id") for s in progress["sections"]}
     progress["sections"] += [{"id": c["id"], "title": c["title"], "chunk": c["id"], "files": [c["file"]],
@@ -545,7 +546,18 @@ def unescaped(text: str, chars: str = "%&#_$") -> int:
     return sum(1 for m in re.finditer(r"(?<!\\)[" + re.escape(chars) + "]", text))
 
 
-def check_chunk(src: str, zh: str, holders: dict) -> list[str]:
+def brace_net(text: str) -> int:
+    """Opening minus closing braces as TeX reads them: after \\\\ (a line break) a brace is bare,
+    while \\{ and \\} print braces."""
+    text = re.sub(r"\\\\", "", text)
+    text = re.sub(r"\\[{}]", "", text)
+    return text.count("{") - text.count("}")
+
+
+def check_chunk(src: str, zh: str, holders: dict, match_source: bool = False) -> list[str]:
+    """Placeholders each once, no new ones, no new unescaped specials, and braces outside placeholders
+    balanced. With `match_source` (chunks split since this rule) the braces only have to leave as many
+    groups open as the source chunk does, so a chunk whose source is unbalanced can be copied as is."""
     problems = []
     found = PLACEHOLDER.findall(zh)
     for key in holders:
@@ -556,8 +568,10 @@ def check_chunk(src: str, zh: str, holders: dict) -> list[str]:
     if extra:
         problems.append(f"unknown placeholders {sorted(extra)}")
     prose = PLACEHOLDER.sub("", zh)
-    if prose.count("{") - len(re.findall(r"\\\{", prose)) != prose.count("}") - len(re.findall(r"\\\}", prose)):
-        problems.append("unbalanced braces outside placeholders")
+    expected = brace_net(PLACEHOLDER.sub("", src)) if match_source else 0
+    if brace_net(prose) != expected:
+        problems.append("unbalanced braces outside placeholders" if not match_source else
+                        f"braces outside placeholders leave {brace_net(prose)} groups open, the source {expected}")
     if unescaped(prose) > unescaped(PLACEHOLDER.sub("", src)):
         problems.append("new unescaped % & # _ or $ outside placeholders")
     return problems
@@ -623,7 +637,8 @@ def merge(work_dir: Path) -> dict:
         if c["id"] in reverted and reverted[c["id"]] == hashlib.sha256(zh.encode("utf-8", "surrogateescape")).hexdigest():
             continue  # still the version that failed to compile
         holders = read_json(chunks_dir / f"{c['id']}.map.json")["placeholders"]
-        issues = check_chunk(read_text(chunks_dir / f"{c['id']}.src.tex"), zh, holders)
+        issues = check_chunk(read_text(chunks_dir / f"{c['id']}.src.tex"), zh, holders,
+                             meta.get("brace_rule") == "source")
         if issues:
             problems[c["id"]] = issues
             continue

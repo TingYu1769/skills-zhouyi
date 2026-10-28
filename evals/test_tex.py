@@ -379,6 +379,25 @@ class TexTest(unittest.TestCase):
         main.write_text(MAIN + "%")
         self.assertEqual(zt.merge(self.work)["rejected"], {})
 
+    def test_braces_are_checked_against_the_source_chunk_for_new_splits(self):
+        holders = {}
+        # Old work directories: braces outside placeholders must balance, counted as TeX reads them.
+        self.assertEqual(zt.check_chunk("A {b} c", "甲 {乙} 丙", holders), [])
+        self.assertEqual(zt.check_chunk("A \\{ b", "甲 \\{ 乙", holders), [])
+        self.assertTrue(zt.check_chunk("A b", "甲\\\\{乙", holders))  # \\ then a bare brace
+        # New splits: the translation leaves as many groups open as its source chunk.
+        self.assertEqual(zt.check_chunk("{A b", "{甲 乙", holders, match_source=True), [])
+        self.assertTrue(zt.check_chunk("{A b", "甲 乙", holders, match_source=True))  # a scope dropped
+        self.assertTrue(zt.check_chunk("{A b", "{{甲 乙", holders, match_source=True))
+        self.assertTrue(zt.check_chunk("A b", "甲\\\\{乙", holders, match_source=True))
+
+    def test_new_splits_record_the_source_brace_rule_and_merge_uses_it(self):
+        chunks, src = self.split()
+        self.assertEqual(zt.read_json(self.work / "chunks/index.json")["brace_rule"], "source")
+        method = next(c["id"] for c in chunks if c["title"] == "Method")
+        (self.work / f"chunks/{method}.zh.tex").write_text(src[method] + "{")
+        self.assertIn(method, zt.merge(self.work)["rejected"])
+
     def test_merge_rejects_lost_duplicated_or_invented_placeholders(self):
         chunks, src = self.split()
         cid = next(c["id"] for c in chunks if c["title"] == "Method")
