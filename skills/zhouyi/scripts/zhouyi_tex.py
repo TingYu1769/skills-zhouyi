@@ -233,6 +233,8 @@ def find_env_end(text: str, i: int, env: str) -> int:
     pattern = re.compile(r"\\(begin|end)\s*\{" + re.escape(env) + r"\}")
     depth = 1
     for m in pattern.finditer(text, i):
+        if in_comment(text, m.start()):  # a commented-out % \begin{tabular}{...} inside the table
+            continue
         depth += 1 if m[1] == "begin" else -1
         if depth == 0:
             return m.end()

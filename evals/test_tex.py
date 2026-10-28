@@ -205,6 +205,14 @@ class TexTest(unittest.TestCase):
         self.assertTrue((paper / "zh-tex/main.tex").read_text().endswith("% fixed\n"))
         self.assertEqual(delivered["files"], 6)  # three source files, two new ones, zh-setup.tex
 
+    def test_commented_begin_inside_a_kept_environment_is_ignored(self):
+        text = ("Before.\n\\begin{tabular}{ll}\n    % \\begin{tabular}{\\textwidth}\n"
+                "a & b \\\\\n\\end{tabular}\nAfter the table.\n")
+        segs = zt.scan(text)
+        kept = [text[a:b] for kind, a, b in segs if kind == "keep"]
+        self.assertTrue(any(k.startswith("\\begin{tabular}") and k.endswith("\\end{tabular}") for k in kept), kept)
+        self.assertIn("After the table.", "".join(text[a:b] for kind, a, b in segs if kind == "text"))
+
     def test_commented_headings_do_not_name_a_chunk(self):
         text = ("\\documentclass{article}\n\\begin{document}\nIntro text.\n"
                 "% \\section*{AI use statement}\n\\footnote{Corresponding author.}\n\\end{document}\n")
