@@ -13,6 +13,7 @@
 - 源码模式：从 `W/overrides/` 删掉的文件，下次合并时在 `W/build/` 里恢复成源码原样（源码没有的就删除）；以前旧的覆盖文件会一直留在 `W/build/` 里起作用。
 - 源码模式：识别论文自己定义的 verbatim 类环境（`\lstnewenvironment`、`\newtcblisting`、`\DefineVerbatimEnvironment`、`\newminted` 等）并整段保留，verbatim 环境到第一个字面 `\end` 为止；`\verb`、`\lstinline` 等行内 verbatim 不再触发公式配对；`$` 跨空行未闭合时报错并给出行号；新增 `tex-split --verbatim-env`，切块输出新增 `verbatim_envs` 和 `kept_prose`。以前提示词框里的 `$(nproc)` 会被当成公式开头，吞掉大段正文。
 - 源码模式：新切的块，合并检查要求占位符外的花括号与原文块一样配平，原文块本身不配平（如代码片段）时照抄也能合并；花括号按反斜杠奇偶计数，`\\{` 里的花括号不再算作已转义。已切块的工作目录仍用原规则。
+- 源码模式：切块不在花括号组里切开，组内开始的节并入前一块；以前 `\hypertarget{x}{\section{..}..}` 会被切成两个不配平的块，两块都过不了合并检查。
 - 源码模式：`tex-prepare` 新增 `--main`，源码包有多个顶层文档时指定主文件；找不到主文件时清理已解包的目录，便于重试。
 
 ## 0.1.0（2026-10-22）

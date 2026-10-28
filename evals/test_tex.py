@@ -398,6 +398,22 @@ class TexTest(unittest.TestCase):
         (self.work / f"chunks/{method}.zh.tex").write_text(src[method] + "{")
         self.assertIn(method, zt.merge(self.work)["rejected"])
 
+    def test_no_cut_inside_a_brace_group_and_unbalanced_files_fall_back(self):
+        text = ("\\hypertarget{sec}{\\section{Alpha}\nAlpha text.\n\\subsection{Beta}\nBeta text.}\n"
+                "\\section{Gamma}\nGamma text.\n")
+        warnings = []
+        chunks = zt.split_file("sections/x.tex", text, False, 14000, warnings=warnings)
+        spans = [text[c["start"]:c["end"]] for c in chunks]
+        self.assertEqual(len(spans), 2)
+        self.assertIn("Alpha text.", spans[0]); self.assertIn("Beta text.}", spans[0])
+        self.assertIn("Gamma text.", spans[1])
+        self.assertTrue(all(zt.brace_net(s) == 0 for s in spans))
+        self.assertIn("2 section start(s) inside a brace group", warnings[0])
+        warnings = []
+        text = "\\section{A}\nText { never closed.\n\\section{B}\nMore text.\n"
+        self.assertEqual(len(zt.split_file("sections/y.tex", text, False, 14000, warnings=warnings)), 2)
+        self.assertIn("do not balance (+1)", warnings[0])
+
     def test_merge_rejects_lost_duplicated_or_invented_placeholders(self):
         chunks, src = self.split()
         cid = next(c["id"] for c in chunks if c["title"] == "Method")

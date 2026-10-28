@@ -380,10 +380,12 @@ def prose_chars(text: str, segs: list) -> int:
 
 
 def split_file(rel: str, text: str, is_main: bool, max_chars: int = 14000,
-               verbatim: frozenset[str] = VERBATIM_ENVS) -> list[dict]:
+               verbatim: frozenset[str] = VERBATIM_ENVS, warnings: list[str] | None = None) -> list[dict]:
     """Chunks for one file: front matter (main only), then one chunk per \\section; a section whose
     prose exceeds max_chars is cut at \\subsection and neighbouring subsections are regrouped up to
-    max_chars. Chunks never cross a section or a file."""
+    max_chars. Chunks never cross a section or a file, and never cut inside a brace group: a section
+    that opens inside one (\\hypertarget{x}{\\section{..}..}) stays with the chunk before it."""
+    warnings = [] if warnings is None else warnings
     chunks = []
     if is_main:
         b = re.search(r"\\begin\s*\{document\}", text)
@@ -395,15 +397,31 @@ def split_file(rel: str, text: str, is_main: bool, max_chars: int = 14000,
         tail = [("keep", e.start(), len(text))] if e.start() < len(text) else []
     else:
         body, tail = scan(text, verbatim=verbatim), []
-    # Units start at every section or subsection; each remembers whether it opens a section.
-    units: list[list] = [[False, []]]
-    for seg in body:
-        kind = boundary(text, seg)
-        if kind and prose_chars(text, units[-1][1]):
-            units.append([kind == "section", []])
-        elif kind == "section":
-            units[-1][0] = True
-        units[-1][1].append(seg)
+    def make_units(in_groups: bool) -> tuple[list[list], int, int]:
+        """Units start at every section or subsection outside brace groups (anywhere, if in_groups);
+        each remembers whether it opens a section. Only text segments hold bare braces: commands,
+        their arguments, math, comments and verbatim are kept segments."""
+        units: list[list] = [[False, []]]
+        depth = held = 0
+        for seg in body:
+            kind = boundary(text, seg)
+            if kind and depth and not in_groups:
+                held += 1
+            elif kind and prose_chars(text, units[-1][1]):
+                units.append([kind == "section", []])
+            elif kind == "section":
+                units[-1][0] = True
+            units[-1][1].append(seg)
+            if seg[0] == "text":
+                depth += text.count("{", seg[1], seg[2]) - text.count("}", seg[1], seg[2])
+        return units, depth, held
+
+    units, depth, held = make_units(False)
+    if depth:
+        warnings.append(f"{rel}: braces in the prose do not balance ({depth:+d}); cut at every section as before")
+        units, _, _ = make_units(True)
+    elif held:
+        warnings.append(f"{rel}: {held} section start(s) inside a brace group stay in the chunk before them")
     current: list = []
     for opens_section, segs in units:
         full = prose_chars(text, current)
@@ -502,12 +520,12 @@ def split(work_dir: Path, max_chars: int = 14000, verbatim_envs: list[str] | tup
     own = sorted(set(detect_verbatim_envs(src)) | {e.strip() for e in verbatim_envs if e.strip()})
     verbatim = VERBATIM_ENVS | set(own)
     report_envs = verbatim | TABLE_ENVS
-    index, kept_prose = [], []
+    index, kept_prose, warnings = [], [], []
     for rel in record["tex_files"]:
         text = read_text(src / rel)
         is_main = rel == record["main"]
         try:
-            file_chunks = split_file(rel, text, is_main, max_chars, verbatim)
+            file_chunks = split_file(rel, text, is_main, max_chars, verbatim, warnings)
         except TexError as exc:
             raise TexError(f"{rel}: {exc}") from None
         for k, chunk in enumerate(file_chunks):
@@ -532,14 +550,14 @@ def split(work_dir: Path, max_chars: int = 14000, verbatim_envs: list[str] | tup
     hashes = {rel: sha256(src / rel) for rel in record["tex_files"]}
     write_json(out / "index.json", {"source_sha256": record["source_sha256"], "src_sha256": hashes,
                                     "brace_rule": "source", "verbatim_envs": own, "kept_prose": kept_prose,
-                                    "chunks": index})
+                                    "warnings": warnings, "chunks": index})
     progress = read_json(work_dir / "progress.json")
     known = {s.get("id") for s in progress["sections"]}
     progress["sections"] += [{"id": c["id"], "title": c["title"], "chunk": c["id"], "files": [c["file"]],
                               "status": "pending"} for c in index if c["id"] not in known]
     write_json(work_dir / "progress.json", progress)
     return {"chunks": len(index), "prose_chars": sum(c["prose_chars"] for c in index), "dir": str(out),
-            "verbatim_envs": own, "kept_prose": kept_prose}
+            "verbatim_envs": own, "kept_prose": kept_prose, "warnings": warnings}
 
 
 def unescaped(text: str, chars: str = "%&#_$") -> int:
