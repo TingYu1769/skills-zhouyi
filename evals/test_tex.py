@@ -285,6 +285,24 @@ class TexTest(unittest.TestCase):
         self.assertEqual(result["overrides"], ["sections/intro.tex"])
         self.assertTrue((self.work / "build/sections/intro.tex").read_text().startswith("% fixed by hand"))
 
+    def test_a_removed_override_no_longer_shadows_the_source(self):
+        self.files["local.sty"] = "\\ProvidesPackage{local}\n"
+        self.tarball = make_tarball(self.root / "local.src.tar.gz", self.files)
+        self.split()
+        overrides = self.work / "overrides"
+        overrides.mkdir()
+        (overrides / "local.sty").write_text("% patched\n")
+        (overrides / "times.sty").write_text("% local stub\n")
+        zt.merge(self.work)
+        self.assertEqual((self.work / "build/local.sty").read_text(), "% patched\n")
+        self.assertTrue((self.work / "build/times.sty").is_file())
+        (overrides / "local.sty").unlink()
+        (overrides / "times.sty").unlink()
+        zt.merge(self.work)
+        self.assertEqual((self.work / "build/local.sty").read_text(), "\\ProvidesPackage{local}\n")
+        self.assertFalse((self.work / "build/times.sty").exists())
+        self.assertEqual((self.work / "build/main.tex").read_text(), MAIN)  # merged files are left to merge
+
     def test_log_summary_counts_tall_vertical_boxes(self):
         log = "Overfull \\vbox (97.86307pt too high) has occurred while \\output is active\n"
         self.assertEqual(zt.summarize_log(log)["overfull_vbox_over_20pt"], 1)

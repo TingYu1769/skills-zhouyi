@@ -480,7 +480,9 @@ def restore(zh: str, holders: dict) -> str:
 
 def apply_overrides(work_dir: Path) -> list[str]:
     """Copy W/overrides/** over W/build after each merge, for hand fixes that merging would overwrite
-    (prose hidden in environment options, labels hard-coded in class files, float adjustments)."""
+    (prose hidden in environment options, labels hard-coded in class files, float adjustments).
+    A file whose override was removed since the last run goes back to the source version (or away,
+    if the source has none); the .tex files that merging rewrites are already fresh."""
     src = work_dir / "overrides"
     copied = []
     for path in sorted(p for p in src.rglob("*") if p.is_file()) if src.is_dir() else []:
@@ -488,6 +490,17 @@ def apply_overrides(work_dir: Path) -> list[str]:
         (work_dir / "build" / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, work_dir / "build" / rel)
         copied.append(rel.as_posix())
+    ledger = work_dir / "overrides-applied.json"
+    merged_files = set(read_json(work_dir / "tex.json")["tex_files"])
+    for rel in read_json(ledger)["files"] if ledger.is_file() else []:
+        if rel in copied or rel in merged_files:
+            continue
+        original, target = work_dir / "src" / rel, work_dir / "build" / rel
+        if original.is_file():
+            shutil.copyfile(original, target)
+        else:
+            target.unlink(missing_ok=True)
+    write_json(ledger, {"files": copied})
     return copied
 
 
