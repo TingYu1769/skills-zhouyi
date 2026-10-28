@@ -159,14 +159,20 @@ def prepare(tarball: Path, work_dir: Path, main: str | None = None) -> dict:
 
 # ---- Scanner: split LaTeX into translatable text and kept spans -------------------------------
 
+# Environments TeX reads verbatim. They are kept whole and end at the first literal \end{name}: inside
+# them % is not a comment and \begin does not nest. split() adds the ones a paper defines itself.
+VERBATIM_ENVS = frozenset({"verbatim", "verbatim*", "Verbatim", "Verbatim*", "BVerbatim", "LVerbatim",
+                           "VerbatimOut", "lstlisting", "minted", "comment", "tcblisting"})
 # Environments kept whole: math, verbatim-like, table bodies (cells stay English), bibliographies.
 WHOLE_ENVS = {
     "equation", "equation*", "align", "align*", "alignat", "alignat*", "gather", "gather*",
     "multline", "multline*", "eqnarray", "eqnarray*", "displaymath", "math", "flalign", "flalign*",
-    "verbatim", "Verbatim", "lstlisting", "minted", "comment",
     "tabular", "tabular*", "tabularx", "tabulary", "longtable", "array", "tikzpicture",
     "thebibliography",
-}
+} | VERBATIM_ENVS
+TABLE_ENVS = {"tabular", "tabular*", "tabularx", "tabulary", "longtable"}
+# Commands whose argument TeX reads verbatim, between two equal delimiters or in braces.
+INLINE_VERBATIM = {"verb", "Verb", "lstinline", "mintinline", "path", "nolinkurl"}
 # Commands kept together with every argument group that follows them.
 KEEP_WITH_ARGS = {
     "cite", "citep", "citet", "citealp", "citealt", "citeauthor", "citeyear", "citeyearpar", "nocite",
@@ -229,6 +235,30 @@ def skip_args(text: str, i: int, groups: int | None) -> int:
             return i
 
 
+def verbatim_end(text: str, i: int, env: str) -> int:
+    """Index after the first literal \\end{env} at or after i, as TeX itself ends a verbatim body."""
+    m = re.compile(r"\\end\s*\{" + re.escape(env) + r"\}").search(text, i)
+    if not m:
+        raise TexError(f"line {text.count(chr(10), 0, i) + 1}: no \\end{{{env}}}")
+    return m.end()
+
+
+def inline_verbatim_end(text: str, i: int, base: str) -> int:
+    """Index after the argument of \\verb|..|, \\lstinline[..]{..}, \\mintinline{lang}|..| and the like;
+    i is just after the command name. A malformed use keeps only the command name."""
+    if base == "mintinline":
+        i = skip_args(text, i, 1)  # options and the language
+    elif base in ("lstinline", "Verb"):
+        i = skip_args(text, i, 0)  # options only
+    if i >= len(text) or text[i].isspace() or text[i].isalpha():
+        return i
+    if text[i] == "{" and base != "verb":
+        return skip_group(text, i)
+    j = text.find(text[i], i + 1)
+    line_end = text.find("\n", i + 1)
+    return i if j < 0 or 0 <= line_end < j else j + 1  # a verbatim argument cannot span lines
+
+
 def find_env_end(text: str, i: int, env: str) -> int:
     """Index after the \\end{env} matching a \\begin{env} that ends before i."""
     pattern = re.compile(r"\\(begin|end)\s*\{" + re.escape(env) + r"\}")
@@ -242,8 +272,10 @@ def find_env_end(text: str, i: int, env: str) -> int:
     raise TexError(f"No \\end{{{env}}}")
 
 
-def scan(text: str, start: int = 0, end: int | None = None) -> list[tuple[str, int, int]]:
-    """Segments ("text"|"keep", start, end) covering text[start:end]."""
+def scan(text: str, start: int = 0, end: int | None = None,
+         verbatim: frozenset[str] = VERBATIM_ENVS) -> list[tuple[str, int, int]]:
+    """Segments ("text"|"keep", start, end) covering text[start:end]; `verbatim` names the
+    environments kept whole up to their first literal \\end."""
     end = len(text) if end is None else end
     segs: list[tuple[str, int, int]] = []
 
@@ -264,10 +296,15 @@ def scan(text: str, start: int = 0, end: int | None = None) -> list[tuple[str, i
             while True:
                 j = text.find(delim, j)
                 if j < 0:
-                    raise TexError("Unclosed math")
+                    raise TexError(f"line {text.count(chr(10), 0, i) + 1}: unclosed math")
                 if text[j - 1] != "\\":
                     break
                 j += 1
+            if re.search(r"\n[ \t]*\n", text[i:j]):
+                # TeX forbids a paragraph break in math, so this $ is not math: it most likely sits in
+                # a verbatim-like environment or command the splitter does not know.
+                raise TexError(f"line {text.count(chr(10), 0, i) + 1}: {delim} is not closed before a blank "
+                               "line; if it sits in a verbatim-like environment, name it with --verbatim-env")
             add("text", mark, i); add("keep", i, j + len(delim)); i = mark = j + len(delim)
         elif c == "\\":
             m = re.match(r"\\([A-Za-z@]+\*?)", text[i:i + 64])
@@ -286,12 +323,16 @@ def scan(text: str, start: int = 0, end: int | None = None) -> list[tuple[str, i
                 continue
             name, j = m[1], i + len(m[0])
             base = name.rstrip("*")
-            if name in ("begin", "end"):
+            if base in INLINE_VERBATIM:
+                j = inline_verbatim_end(text, j, base)
+            elif name in ("begin", "end"):
                 em = re.match(r"\s*\{([^}]+)\}", text[j:])
                 if not em:
                     raise TexError(f"Malformed \\{name} near {text[i:i + 40]!r}")
                 env, j = em[1].strip(), j + em.end()
-                if name == "begin" and env in WHOLE_ENVS:
+                if name == "begin" and env in verbatim:
+                    j = verbatim_end(text, j, env)
+                elif name == "begin" and env in WHOLE_ENVS:
                     j = find_env_end(text, j, env)
                 elif name == "begin":
                     j = skip_args(text, j, ENV_ARGS.get(env, 0))
@@ -311,7 +352,8 @@ def scan(text: str, start: int = 0, end: int | None = None) -> list[tuple[str, i
     return segs
 
 
-def scan_front(text: str, start: int, end: int) -> list[tuple[str, int, int]]:
+def scan_front(text: str, start: int, end: int,
+               verbatim: frozenset[str] = VERBATIM_ENVS) -> list[tuple[str, int, int]]:
     """Preamble: everything kept except the arguments of \\title and \\thanks."""
     segs, pos = [], start
     for m in re.finditer(r"\\(" + "|".join(FRONT_TEXT) + r")\s*(\[[^\]]*\])?\s*\{", text[start:end]):
@@ -320,7 +362,7 @@ def scan_front(text: str, start: int, end: int) -> list[tuple[str, int, int]]:
             continue
         b = skip_group(text, a - 1) - 1
         segs.append(("keep", pos, a))
-        segs.extend(scan(text, a, b))
+        segs.extend(scan(text, a, b, verbatim))
         pos = b
     segs.append(("keep", pos, end))
     return [s for s in segs if s[1] < s[2]]
@@ -337,7 +379,8 @@ def prose_chars(text: str, segs: list) -> int:
     return sum(y - x for k, x, y in segs if k == "text" and text[x:y].strip())
 
 
-def split_file(rel: str, text: str, is_main: bool, max_chars: int = 14000) -> list[dict]:
+def split_file(rel: str, text: str, is_main: bool, max_chars: int = 14000,
+               verbatim: frozenset[str] = VERBATIM_ENVS) -> list[dict]:
     """Chunks for one file: front matter (main only), then one chunk per \\section; a section whose
     prose exceeds max_chars is cut at \\subsection and neighbouring subsections are regrouped up to
     max_chars. Chunks never cross a section or a file."""
@@ -347,11 +390,11 @@ def split_file(rel: str, text: str, is_main: bool, max_chars: int = 14000) -> li
         e = re.search(r"\\end\s*\{document\}", text)
         if not b or not e:
             raise TexError(f"{rel}: no document environment")
-        chunks.append(scan_front(text, 0, b.end()))
-        body = scan(text, b.end(), e.start())
+        chunks.append(scan_front(text, 0, b.end(), verbatim))
+        body = scan(text, b.end(), e.start(), verbatim)
         tail = [("keep", e.start(), len(text))] if e.start() < len(text) else []
     else:
-        body, tail = scan(text), []
+        body, tail = scan(text, verbatim=verbatim), []
     # Units start at every section or subsection; each remembers whether it opens a section.
     units: list[list] = [[False, []]]
     for seg in body:
@@ -413,19 +456,71 @@ def chunk_title(text: str, chunk: dict, index: int, is_main: bool) -> str:
     return "front matter" if index == 0 and is_main else f"{chunk['file']} part {index + 1}"
 
 
-def split(work_dir: Path, max_chars: int = 14000) -> dict:
+VERBATIM_BODY = re.compile(r"\\begin\s*\{(" + "|".join(map(re.escape, sorted(VERBATIM_ENVS, key=len, reverse=True)))
+                           + r")\}.*?\\end\s*\{\1\}", re.S)
+VERBATIM_DEFINERS = re.compile(r"\\(?:lstnewenvironment|newtcblisting|renewtcblisting|NewTCBListing|RenewTCBListing|"
+                               r"DeclareTCBListing|ProvideTCBListing|DefineVerbatimEnvironment|"
+                               r"RecustomVerbatimEnvironment)\s*(?:\[[^\]]*\]\s*)?\{([^{}]+)\}")
+NEWMINTED = re.compile(r"\\newminted\s*(?:\[([^\]]*)\]\s*)?\{([^{}]+)\}")
+ENV_DEFINERS = re.compile(r"\\(newenvironment|renewenvironment|NewDocumentEnvironment|RenewDocumentEnvironment|"
+                          r"DeclareDocumentEnvironment|ProvideDocumentEnvironment)\s*\{([^{}]+)\}")
+VERBATIM_OPENERS = re.compile(r"\\VerbatimEnvironment|\\begin\s*\{(?:Verbatim|BVerbatim|LVerbatim|verbatim|lstlisting|minted)\}")
+
+
+def detect_verbatim_envs(src: Path) -> list[str]:
+    """Environments the source defines as verbatim (listings, tcolorbox listings, fancyvrb, minted, or
+    an environment whose begin code opens one), ignoring definitions in comments or in verbatim text."""
+    found = set()
+    for path in sorted(p for p in Path(src).rglob("*") if p.is_file() and p.suffix in (".tex", ".sty", ".cls")):
+        text = VERBATIM_BODY.sub("", read_text(path))  # first: inside verbatim, % is not a comment
+        text = re.sub(r"(?<!\\)((?:\\\\)*)%[^\n]*\n?", r"\1", text)  # comments, with their line break
+        found.update(m[1].strip() for m in VERBATIM_DEFINERS.finditer(text))
+        found.update((m[1] or f"{m[2]}code").strip() for m in NEWMINTED.finditer(text))
+        for m in ENV_DEFINERS.finditer(text):
+            k, spec = m.end(), "Document" in m[1]  # the xparse forms take an argument spec first
+            try:
+                while True:  # skip [n][default] or the argument spec, then read the begin code
+                    k = re.compile(r"\s*").match(text, k).end()
+                    if text.startswith("[", k):
+                        k = skip_group(text, k, "[", "]")
+                    elif spec and text.startswith("{", k):
+                        k, spec = skip_group(text, k), False
+                    else:
+                        break
+                if text.startswith("{", k) and VERBATIM_OPENERS.search(text[k:skip_group(text, k)]):
+                    found.add(m[2].strip())
+            except TexError:
+                continue
+    return sorted(found)
+
+
+def split(work_dir: Path, max_chars: int = 14000, verbatim_envs: list[str] | tuple = ()) -> dict:
     work_dir = Path(work_dir)
     record = read_json(work_dir / "tex.json")
     src, out = work_dir / "src", work_dir / "chunks"
     out.mkdir(exist_ok=True)
-    index = []
+    own = sorted(set(detect_verbatim_envs(src)) | {e.strip() for e in verbatim_envs if e.strip()})
+    verbatim = VERBATIM_ENVS | set(own)
+    report_envs = verbatim | TABLE_ENVS
+    index, kept_prose = [], []
     for rel in record["tex_files"]:
         text = read_text(src / rel)
         is_main = rel == record["main"]
-        for k, chunk in enumerate(split_file(rel, text, is_main, max_chars)):
+        try:
+            file_chunks = split_file(rel, text, is_main, max_chars, verbatim)
+        except TexError as exc:
+            raise TexError(f"{rel}: {exc}") from None
+        for k, chunk in enumerate(file_chunks):
             cid = f"c{len(index) + 1:02d}"
             body, holders = render_chunk(text, chunk["segments"])
-            if not PLACEHOLDER.sub("", body).strip():
+            has_prose = bool(PLACEHOLDER.sub("", body).strip())
+            for value in holders.values():  # long English kept whole, for the agent to judge
+                em = re.match(r"\\begin\s*\{([^}]+)\}", value)
+                letters = len(re.findall(r"[A-Za-z]", value))
+                if em and em[1].strip() in report_envs and letters > 400:
+                    kept_prose.append({"chunk": cid if has_prose else None, "file": rel,
+                                       "env": em[1].strip(), "letters": letters})
+            if not has_prose:
                 continue  # nothing to translate; the span stays as in the source
             (out / f"{cid}.src.tex").write_text(body, encoding="utf-8", errors="surrogateescape")
             write_json(out / f"{cid}.map.json", {"file": rel, "start": chunk["start"], "end": chunk["end"],
@@ -435,13 +530,15 @@ def split(work_dir: Path, max_chars: int = 14000) -> dict:
                           "prose_chars": len(PLACEHOLDER.sub("", body))})
     # Chunk offsets point into W/src as it is now; merge refuses to run if a file changes later.
     hashes = {rel: sha256(src / rel) for rel in record["tex_files"]}
-    write_json(out / "index.json", {"source_sha256": record["source_sha256"], "src_sha256": hashes, "chunks": index})
+    write_json(out / "index.json", {"source_sha256": record["source_sha256"], "src_sha256": hashes,
+                                    "verbatim_envs": own, "kept_prose": kept_prose, "chunks": index})
     progress = read_json(work_dir / "progress.json")
     known = {s.get("id") for s in progress["sections"]}
     progress["sections"] += [{"id": c["id"], "title": c["title"], "chunk": c["id"], "files": [c["file"]],
                               "status": "pending"} for c in index if c["id"] not in known]
     write_json(work_dir / "progress.json", progress)
-    return {"chunks": len(index), "prose_chars": sum(c["prose_chars"] for c in index), "dir": str(out)}
+    return {"chunks": len(index), "prose_chars": sum(c["prose_chars"] for c in index), "dir": str(out),
+            "verbatim_envs": own, "kept_prose": kept_prose}
 
 
 def unescaped(text: str, chars: str = "%&#_$") -> int:
@@ -827,6 +924,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--work-dir", required=True, type=Path)
     p.add_argument("--max-chars", type=int, default=14000,
                    help="Prose characters per chunk before a section is cut at \\subsection (about 3-4K tokens)")
+    p.add_argument("--verbatim-env", action="append", default=[],
+                   help="Comma-separated environments to keep whole as verbatim, beyond those detected")
     p = sub.add_parser("tex-merge", help="Check translated chunks and restore them into W/build")
     p.add_argument("--work-dir", required=True, type=Path)
     p = sub.add_parser("tex-build", help="Merge chunks, add Chinese support and compile with XeLaTeX")
@@ -852,7 +951,8 @@ def main() -> int:
         if args.command == "tex-prepare":
             result = prepare(args.tarball, args.work_dir, args.main)
         elif args.command == "tex-split":
-            result = split(args.work_dir, args.max_chars)
+            result = split(args.work_dir, args.max_chars,
+                           [e for arg in args.verbatim_env for e in arg.split(",")])
         elif args.command == "tex-merge":
             result = merge(args.work_dir)
             print(json.dumps(result, ensure_ascii=False, indent=2))

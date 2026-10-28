@@ -206,6 +206,54 @@ class TexTest(unittest.TestCase):
         self.assertTrue((paper / "zh-tex/main.tex").read_text().endswith("% fixed\n"))
         self.assertEqual(delivered["files"], 6)  # three source files, two new ones, zh-setup.tex
 
+    def test_verbatim_environments_the_paper_defines_are_detected(self):
+        src = self.root / "defs"
+        src.mkdir()
+        (src / "macros.sty").write_text(
+            "\\newtcblisting[auto counter]{diagnosisbox}[2][]{listing only}\n"
+            "% \\newtcblisting{commented}{}\n"
+            "\\newenvironment%\n  {code}{\\VerbatimEnvironment\\begin{Verbatim}}{\\end{Verbatim}}\n"
+            "\\NewDocumentEnvironment{xcode}{O{}}{\\VerbatimEnvironment\\begin{Verbatim}}{\\end{Verbatim}}\n"
+            "\\newenvironment{plain}[1][x]{\\begin{center}}{\\end{center}}\n"
+            "\\newminted[pycode]{python}{}\n\\newminted{bash}{}\n")
+        (src / "main.tex").write_text(
+            "\\begin{lstlisting}\n\\lstnewenvironment{inlisting}{}{}\n\\end{lstlisting}\n"
+            "\\lstnewenvironment{prompt}{\\lstset{basicstyle=\\ttfamily}}{}\n")
+        self.assertEqual(zt.detect_verbatim_envs(src), ["bashcode", "code", "diagnosisbox", "prompt", "pycode", "xcode"])
+
+    def test_verbatim_bodies_and_inline_verbatim_hide_their_dollars(self):
+        text = ("Before the box.\n\\begin{diagnosisbox}{Title}\nRun make -j$(nproc), 100% done.\n"
+                "\\begin{lstlisting}\n\\end{diagnosisbox}\nAfter $x$ with \\verb|$HOME| and \\verb*+a$b+, "
+                "\\lstinline[language=sh]{echo $1} and \\nolinkurl{x_$y}.\n")
+        segs = zt.scan(text, verbatim=zt.VERBATIM_ENVS | {"diagnosisbox"})
+        kept = [text[a:b] for kind, a, b in segs if kind == "keep"]
+        prose = "".join(text[a:b] for kind, a, b in segs if kind == "text")
+        self.assertIn("\\begin{diagnosisbox}{Title}\nRun make -j$(nproc), 100% done.\n\\begin{lstlisting}\n"
+                      "\\end{diagnosisbox}", kept)  # ends at the first \end; no nesting, % is text
+        for span in ("$x$", "\\verb|$HOME|", "\\verb*+a$b+", "\\lstinline[language=sh]{echo $1}", "\\nolinkurl{x_$y}"):
+            self.assertIn(span, kept)
+        self.assertIn("Before the box.", prose)
+        self.assertIn("After ", prose)
+
+    def test_a_dollar_left_open_across_a_blank_line_stops_the_split(self):
+        with self.assertRaisesRegex(zt.TexError, "line 2: \\$ is not closed before a blank line.*--verbatim-env"):
+            zt.scan("Intro.\nRun make -j$(nproc) here.\n\nNext paragraph costs $5.\n")
+
+    def test_split_reports_verbatim_environments_and_long_kept_english(self):
+        prompt = "Describe the task in plain words and answer briefly. " * 12
+        main = MAIN.replace("\\usepackage{amsmath}", "\\usepackage{amsmath}\n\\newtcblisting{promptbox}{}").replace(
+            "\\section{Method}", "\\section{Method}\n\\begin{promptbox}\n" + prompt + "cost $5\n\\end{promptbox}\n"
+            "\\begin{notebox}\nA $3 fee.\n\\end{notebox}")
+        self.tarball = make_tarball(self.root / "boxes.src.tar.gz", {**self.files, "main.tex": main})
+        zt.prepare(self.tarball, self.work)
+        result = zt.split(self.work, verbatim_envs=["notebox"])
+        self.assertEqual(result["verbatim_envs"], ["notebox", "promptbox"])
+        self.assertEqual([(k["env"], k["chunk"] is not None) for k in result["kept_prose"]], [("promptbox", True)])
+        index = zt.read_json(self.work / "chunks/index.json")
+        self.assertEqual(index["verbatim_envs"], ["notebox", "promptbox"])
+        method = next(c["id"] for c in index["chunks"] if c["title"] == "Method")
+        self.assertIn("The method uses a toy loop", (self.work / f"chunks/{method}.src.tex").read_text())
+
     def test_commented_begin_inside_a_kept_environment_is_ignored(self):
         text = ("Before.\n\\begin{tabular}{ll}\n    % \\begin{tabular}{\\textwidth}\n"
                 "a & b \\\\\n\\end{tabular}\nAfter the table.\n")
