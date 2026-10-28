@@ -297,6 +297,21 @@ class TexTest(unittest.TestCase):
         for rel in ["main.tex", "sections/intro.tex"]:
             self.assertEqual((self.work / "build" / rel).read_text(), self.files[rel])
 
+    def test_merge_refuses_a_source_changed_after_split(self):
+        chunks, src = self.split()
+        main = self.work / "src/main.tex"
+        main.write_text(main.read_text().replace("\\usepackage{times}", "\\usepackage{times}\n"))
+        with self.assertRaisesRegex(zt.TexError, "changed after tex-split"):
+            zt.merge(self.work)
+        main.write_text(MAIN)
+        self.assertEqual(zt.merge(self.work)["rejected"], {})
+        # Work directories split before the check existed carry no hashes and still merge.
+        index = zt.read_json(self.work / "chunks/index.json")
+        del index["src_sha256"]
+        zt.write_json(self.work / "chunks/index.json", index)
+        main.write_text(MAIN + "%")
+        self.assertEqual(zt.merge(self.work)["rejected"], {})
+
     def test_merge_rejects_lost_duplicated_or_invented_placeholders(self):
         chunks, src = self.split()
         cid = next(c["id"] for c in chunks if c["title"] == "Method")

@@ -432,7 +432,9 @@ def split(work_dir: Path, max_chars: int = 14000) -> dict:
             index.append({"id": cid, "file": rel, "title": chunk_title(text, chunk, k, is_main),
                           "start": chunk["start"], "end": chunk["end"],
                           "prose_chars": len(PLACEHOLDER.sub("", body))})
-    write_json(out / "index.json", {"source_sha256": record["source_sha256"], "chunks": index})
+    # Chunk offsets point into W/src as it is now; merge refuses to run if a file changes later.
+    hashes = {rel: sha256(src / rel) for rel in record["tex_files"]}
+    write_json(out / "index.json", {"source_sha256": record["source_sha256"], "src_sha256": hashes, "chunks": index})
     progress = read_json(work_dir / "progress.json")
     known = {s.get("id") for s in progress["sections"]}
     progress["sections"] += [{"id": c["id"], "title": c["title"], "chunk": c["id"], "files": [c["file"]],
@@ -493,7 +495,12 @@ def merge(work_dir: Path) -> dict:
     work_dir = Path(work_dir)
     record = read_json(work_dir / "tex.json")
     chunks_dir, src, build_dir = work_dir / "chunks", work_dir / "src", work_dir / "build"
-    index = read_json(chunks_dir / "index.json")["chunks"]
+    meta = read_json(chunks_dir / "index.json")
+    for rel, digest in meta.get("src_sha256", {}).items():
+        if sha256(src / rel) != digest:  # merging by stale offsets would silently drop or repeat text
+            raise TexError(f"W/src/{rel} changed after tex-split, so the chunk offsets no longer match it; "
+                           "restore it and put fixes in W/overrides/")
+    index = meta["chunks"]
     reverted = read_json(chunks_dir / "reverted.json") if (chunks_dir / "reverted.json").exists() else {}
     used, problems, placed = [], {}, {}
     per_file: dict[str, list] = {}
