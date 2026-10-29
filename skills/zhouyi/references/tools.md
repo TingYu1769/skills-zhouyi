@@ -28,6 +28,22 @@ uv run scripts/zhouyi.py inspect papers/example.pdf \
 
 `source.json` 中的页宽高是旋转后的可见页面尺寸；`text_blocks_unrotated` 是 PyMuPDF 的未旋转文字坐标，只辅助阅读顺序判断。裁剪以渲染预览的归一化坐标为准。
 
+## 下载、状态与清理
+
+```bash
+uv run scripts/zhouyi.py fetch https://arxiv.org/abs/1706.03762 --output-root reading/
+uv run scripts/zhouyi.py status reading/
+uv run scripts/zhouyi.py clean reading/.zhouyi/202601.arXiv.Example --dry-run
+```
+
+`fetch` 接受 arXiv 编号或链接，下载指定版本（缺省为最新版，或链接里写明的版本）的 PDF 和同版本源码，放到 `<输出根目录>/.zhouyi/downloads/`，并返回标题、作者、首次公开年月和两个文件的 SHA-256。源码类型分别报告：`tar.gz`、`gz`（单个 tex 文件）、`pdf-only`（作者只提交了 PDF）、`none`、`not public`；后三种改走 PDF 模式。网络不通时重试三次，仍失败就请用户提供本地 PDF。
+
+`status` 读输出根目录下各篇的工作记录，列出模式、阶段（prepared、split、translating、built、delivered；PDF 模式为 inspected、translating、delivered）、进度、未决 issues、最后活动时间（`minutes_ago`）、占用空间，以及 `tools/` 下各脚本首行注释写的用途。续作前先看它：`minutes_ago` 很小又不是本会话改的，先问用户是否有别的会话在处理同一篇。
+
+`clean` 删除论文工作目录下所有 `tmp/` 和编译中间文件（`.aux`、`.log`、`.xdv` 与编出的 PDF 等），源码包自带的文件、`src/`、`chunks/`、`overrides/`、`tools/` 和工作记录都保留；`--dry-run` 只列清单和可释放的空间。交付检查通过后默认运行一次。
+
+工作目录的约定：预览、拼图、比对结果一律放在该篇工作目录的 `tmp/` 下；agent 自写的脚本放在 `tools/`，第一行注释写明用途和何时要重跑（例如“改了 c03 之后重跑，重新生成 overrides/main.tex”）。
+
 ## 预览和裁剪
 
 ```bash

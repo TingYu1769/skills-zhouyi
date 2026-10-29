@@ -94,6 +94,93 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(len(result["sheets"]), 1)
         self.assertTrue(Path(result["sheets"][0]["path"]).is_file())
 
+    def test_status_reads_stage_progress_issues_and_tool_notes(self):
+        root = self.root / "out"
+        tex = root / ".zhouyi" / "2601_arXiv_A" / "tex"
+        (tex / "chunks").mkdir(parents=True)
+        (tex / "tools").mkdir()
+        z.write_json(tex / "tex.json", {"main": "main.tex", "tex_files": ["main.tex"]})
+        z.write_json(tex / "chunks" / "index.json", {"chunks": [{"id": "c01"}, {"id": "c02"}]})
+        (tex / "chunks" / "c01.zh.tex").write_text("译文")
+        z.write_json(tex / "progress.json", {"mode": "tex", "issues": [{"status": "open"}, {"status": "noted"}]})
+        (tex / "tools" / "gen.py").write_text("# rebuild overrides/main.tex after editing c03\nprint()\n")
+        (tex / "tools" / "__pycache__").mkdir()
+        pdf = root / ".zhouyi" / "2601_arXiv_B"
+        pdf.mkdir(parents=True)
+        z.write_json(pdf / "progress.json", {"sections": [{"status": "verified"}, {"status": "pending"}], "issues": []})
+        papers = {p["id"]: p for p in z.status(root)["papers"]}
+        a, b = papers["2601_arXiv_A"], papers["2601_arXiv_B"]
+        self.assertEqual((a["modes"], a["stage"], a["progress"], a["open_issues"]), (["tex"], "translating", "1/2 chunks", 1))
+        self.assertEqual(a["tools"], [{"path": "gen.py", "note": "rebuild overrides/main.tex after editing c03"}])
+        self.assertEqual((b["modes"], b["stage"], b["progress"]), (["pdf"], "translating", "1/2 sections verified"))
+        self.assertLess(a["minutes_ago"], 5)
+
+    def test_clean_removes_tmp_and_build_leftovers_only(self):
+        work = self.root / ".zhouyi" / "2601_arXiv_A"
+        tex = work / "tex"
+        for rel in ("tmp/review/page_001.png", "tex/tmp/x.jpg", "tex/src/main.tex", "tex/build/main.tex",
+                    "tex/build/main.aux", "tex/build/main.log", "tex/build/main.pdf", "tex/build/figs/plot.pdf",
+                    "tex/chunks/c01.zh.tex", "tex/overrides/a.sty", "tex/tools/gen.py"):
+            (work / rel).parent.mkdir(parents=True, exist_ok=True)
+            (work / rel).write_text("x")
+        (tex / "src" / "figs").mkdir()
+        (tex / "src" / "figs" / "plot.pdf").write_text("x")
+        for rel in ("src/logo.pdf", "build/logo.pdf"):  # shipped with the source, next to the main file
+            (tex / rel).write_text("x")
+        plan = z.clean(work, dry_run=True)
+        self.assertTrue((work / "tmp").exists())
+        self.assertEqual(plan["count"], 5)
+        z.clean(work)
+        for rel in ("tex/src/main.tex", "tex/build/main.tex", "tex/build/figs/plot.pdf", "tex/chunks/c01.zh.tex",
+                    "tex/overrides/a.sty", "tex/tools/gen.py", "tex/build/logo.pdf"):
+            self.assertTrue((work / rel).exists(), rel)
+        for rel in ("tmp", "tex/tmp", "tex/build/main.aux", "tex/build/main.log", "tex/build/main.pdf"):
+            self.assertFalse((work / rel).exists(), rel)
+
+    def test_fetch_downloads_pdf_and_source_of_the_same_version(self):
+        import http.server, threading, io as _io, tarfile as _tar
+        buf = _io.BytesIO()
+        with _tar.open(fileobj=buf, mode="w:gz") as t:
+            data = b"\\documentclass{article}"
+            info = _tar.TarInfo("main.tex"); info.size = len(data); t.addfile(info, _io.BytesIO(data))
+        atom = ('<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/{id}v{v}</id>'
+                '<published>2017-06-12T17:57:34Z</published><title>Attention Is\n All</title>'
+                '<author><name>A. Author</name></author></entry></feed>')
+        routes = {"/api?id_list=1706.03762": atom.format(id="1706.03762", v=7).encode(),
+                  "/api?id_list=2001.00001": atom.format(id="2001.00001", v=1).encode(),
+                  "/api?id_list=2002.00002": atom.format(id="2002.00002", v=2).encode(),
+                  "/pdf/1706.03762v7": b"%PDF-1.5 seven", "/pdf/1706.03762v1": b"%PDF-1.5 one",
+                  "/src/1706.03762v7": buf.getvalue(), "/src/1706.03762v1": buf.getvalue(),
+                  "/pdf/2001.00001v1": b"%PDF-1.5", "/src/2001.00001v1": b"%PDF-1.5 only",
+                  "/pdf/2002.00002v2": b"%PDF-1.5"}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = routes.get(self.path)
+                self.send_response(200 if body else 404); self.end_headers()
+                self.wfile.write(body or b"not found")
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        old = (z.ARXIV_API, z.ARXIV_SITE)
+        z.ARXIV_API, z.ARXIV_SITE = base + "/api?id_list=", base
+        try:
+            r = z.fetch("https://arxiv.org/abs/1706.03762", self.root)
+            self.assertEqual((r["version"], r["latest"], r["yymm"], r["title"]), (7, 7, "1706", "Attention Is All"))
+            self.assertEqual(r["source"]["type"], "tar.gz")
+            self.assertTrue(Path(r["pdf"]["path"]).read_bytes().endswith(b"seven"))
+            self.assertEqual(z.fetch("1706.03762v1", self.root)["version"], 1)
+            self.assertEqual(z.fetch("2001.00001", self.root)["source"]["type"], "pdf-only")
+            self.assertEqual(z.fetch("2002.00002", self.root)["source"]["type"], "none")
+            with self.assertRaises(z.ZhouyiError):
+                z.fetch("not an id", self.root)
+        finally:
+            z.ARXIV_API, z.ARXIV_SITE = old
+            server.shutdown()
+
     def test_inspection_detects_rotation_scan_and_preserves_progress(self):
         info = z.inspect_pdf(self.source, self.work)
         self.assertEqual(info["source"]["page_count"], 4)

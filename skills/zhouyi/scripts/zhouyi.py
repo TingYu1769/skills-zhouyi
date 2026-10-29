@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 import argparse
+import collections
+from datetime import datetime, timezone
+import difflib
 import hashlib
 import io
 import json
@@ -15,12 +18,16 @@ import math
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import shutil
 import sys
+import tarfile
 import tempfile
+import time
 import unicodedata
-import difflib
-import collections
+import urllib.error
 from urllib.parse import unquote, urlsplit
+import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
 
 import pymupdf
@@ -329,6 +336,172 @@ def review_sheet(pdf: Path, output_dir: Path, log: Path | None = None, max_pages
                          cols=min(3, len(chosen)), max_side=2000, prefix="review")
     return {"page_count": count, "pages": [{"page": p, "reasons": sorted(reasons[p])} for p in chosen],
             "not_shown": max(0, len(reasons) - len(chosen)), "sheets": sheets}
+
+
+# ---- Work directories: status, cleaning, fetching ------------------------------------------------
+
+BUILD_LEFTOVERS = {".aux", ".log", ".out", ".toc", ".xdv", ".fls", ".fdb_latexmk", ".blg", ".bcf", ".lof", ".lot",
+                   ".synctex.gz", ".run.xml", ".nav", ".snm", ".vrb"}
+
+
+def tree_size(path: Path) -> int:
+    return sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file()) if Path(path).exists() else 0
+
+
+def last_change(path: Path) -> float:
+    times = [p.stat().st_mtime for p in Path(path).rglob("*") if p.is_file()]
+    return max(times, default=Path(path).stat().st_mtime)
+
+
+def tool_notes(work: Path) -> list[dict]:
+    """First comment line of each script in tools/: what it does and when to rerun it."""
+    notes = []
+    for path in sorted(p for p in (work / "tools").glob("*") if p.is_file()) if (work / "tools").is_dir() else []:
+        first = next((l.strip().lstrip("#/-; ").strip() for l in path.read_text(errors="replace").splitlines()
+                      if l.strip() and not l.startswith("#!")), "")
+        notes.append({"path": path.name, "note": first[:160]})
+    return notes
+
+
+def paper_status(root: Path, pid: str) -> dict:
+    """Mode, stage and progress of one paper from its own work records; nothing is recomputed."""
+    work = root / ".zhouyi" / pid
+    paper = root / pid
+    entry = {"id": pid, "modes": [], "stage": "", "progress": "", "open_issues": 0}
+    tex = work / "tex"
+    if (tex / "tex.json").is_file():
+        entry["modes"].append("tex")
+        index = read_json(tex / "chunks" / "index.json") if (tex / "chunks" / "index.json").is_file() else None
+        summary = read_json(tex / "build-summary.json") if (tex / "build-summary.json").is_file() else {}
+        done = len(list((tex / "chunks").glob("*.zh.tex"))) if index else 0
+        total = len(index["chunks"]) if index else 0
+        entry["progress"] = f"{done}/{total} chunks" if index else ""
+        if (paper / f"{pid}.zh.pdf").is_file():
+            entry["stage"] = "delivered"
+        elif summary.get("ok") and done and done == total:
+            entry["stage"] = "built"
+        elif done:
+            entry["stage"] = "translating"
+        elif index:
+            entry["stage"] = "split"
+        else:
+            entry["stage"] = "prepared"
+        if (tex / "progress.json").is_file():
+            entry["open_issues"] += sum(1 for i in read_json(tex / "progress.json").get("issues", []) if i.get("status") == "open")
+    if (work / "progress.json").is_file() and read_json(work / "progress.json").get("mode") != "tex":
+        state = read_json(work / "progress.json")
+        entry["modes"].append("pdf")
+        sections = state.get("sections", [])
+        done = sum(1 for s in sections if s.get("status") == "verified")
+        entry["open_issues"] += sum(1 for i in state.get("issues", []) if i.get("status") == "open")
+        if not entry["stage"]:
+            entry["progress"] = f"{done}/{len(sections)} sections verified"
+            entry["stage"] = ("delivered" if (paper / f"{pid}.md").is_file() and state.get("document_review", {}).get("status") == "verified"
+                              else "translating" if sections else "inspected")
+    changed = last_change(work)
+    entry.update(last_activity=datetime.fromtimestamp(changed, timezone.utc).isoformat(timespec="seconds"),
+                 minutes_ago=int((time.time() - changed) // 60), size_mb=round(tree_size(work) / 2**20, 1),
+                 tools=tool_notes(tex if "tex" in entry["modes"] else work))
+    return entry
+
+
+def status(root: Path) -> dict:
+    root = Path(root)
+    base = root / ".zhouyi"
+    if not base.is_dir():
+        raise ZhouyiError(f"No .zhouyi/ under {root}")
+    papers = [paper_status(root, d.name) for d in sorted(base.iterdir())
+              if d.is_dir() and ((d / "progress.json").is_file() or (d / "tex" / "tex.json").is_file())]
+    return {"root": str(root), "papers": papers}
+
+
+def clean(work: Path, dry_run: bool = False) -> dict:
+    """Remove what can be made again: every tmp/ under the paper's work directory and LaTeX
+    leftovers in tex/build. Sources, chunks, overrides, tools and work records stay."""
+    work = Path(work)
+    if not work.is_dir():
+        raise ZhouyiError(f"No such work directory: {work}")
+    targets = [p for p in work.rglob("tmp") if p.is_dir()]
+    build = work / "build" if (work / "build").is_dir() else work / "tex" / "build"
+    if build.is_dir():
+        src = build.parent / "src"
+        for p in build.rglob("*"):
+            rel = p.relative_to(build)
+            if not p.is_file() or (src / rel).exists():
+                continue  # files of the source package stay
+            if p.suffix in BUILD_LEFTOVERS or "".join(p.suffixes[-2:]) in BUILD_LEFTOVERS or (p.suffix == ".pdf" and p.parent == build):
+                targets.append(p)
+    freed = sum(tree_size(p) if p.is_dir() else p.stat().st_size for p in targets)
+    if not dry_run:
+        for p in targets:
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+    return {"work_dir": str(work), "removed": [str(p.relative_to(work)) for p in targets][:50],
+            "count": len(targets), "freed_mb": round(freed / 2**20, 1), "dry_run": dry_run}
+
+
+ARXIV_API = "https://export.arxiv.org/api/query?id_list="
+ARXIV_SITE = "https://arxiv.org"
+ATOM = {"a": "http://www.w3.org/2005/Atom"}
+
+
+def http_get(url: str, tries: int = 3) -> tuple[int, bytes]:
+    """Status and body; 4xx answers are returned, network errors retried with a short backoff."""
+    for attempt in range(tries):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "zhouyi (paper translation skill)"})
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:
+                return exc.code, exc.read()
+            last = exc
+        except (urllib.error.URLError, OSError) as exc:
+            last = exc
+        time.sleep(2 * (attempt + 1))
+    raise ZhouyiError(f"Cannot reach {url}: {last}; download the PDF yourself and pass the local file")
+
+
+def fetch(ref: str, root: Path, version: int | None = None) -> dict:
+    """Download an arXiv PDF and the source of the same version into ROOT/.zhouyi/downloads/."""
+    m = re.search(r"(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v(\d+))?", ref)
+    if not m:
+        raise ZhouyiError(f"Not an arXiv identifier or link: {ref}")
+    arxiv = m[1]
+    code, body = http_get(ARXIV_API + arxiv)
+    entry = ET.fromstring(body).find("a:entry", ATOM) if code == 200 else None
+    if entry is None or entry.find("a:id", ATOM) is None:
+        raise ZhouyiError(f"arXiv has no record for {arxiv}")
+    latest = int(re.search(r"v(\d+)$", entry.find("a:id", ATOM).text.strip())[1])
+    version = version or (int(m[2]) if m[2] else latest)
+    out = Path(root) / ".zhouyi" / "downloads"
+    out.mkdir(parents=True, exist_ok=True)
+    name = f"{arxiv.replace('/', '_')}v{version}"
+    code, pdf = http_get(f"{ARXIV_SITE}/pdf/{arxiv}v{version}")
+    if code != 200 or not pdf.startswith(b"%PDF"):
+        raise ZhouyiError(f"No PDF for {arxiv}v{version} (HTTP {code})")
+    pdf_path = out / f"{name}.pdf"
+    write_bytes(pdf_path, pdf)
+    code, src = http_get(f"{ARXIV_SITE}/src/{arxiv}v{version}")
+    source = {"type": "none", "path": None, "sha256": None}
+    if code == 200 and src.startswith(b"\x1f\x8b"):
+        try:
+            with tarfile.open(fileobj=io.BytesIO(src), mode="r:gz"):
+                kind, suffix = "tar.gz", ".src.tar.gz"
+        except tarfile.TarError:
+            kind, suffix = "gz", ".src.gz"  # a single gzipped .tex
+        src_path = out / f"{name}{suffix}"
+        write_bytes(src_path, src)
+        source = {"type": kind, "path": str(src_path), "sha256": sha256(src_path)}
+    elif code == 200 and src.startswith(b"%PDF"):
+        source["type"] = "pdf-only"
+    elif code == 403:
+        source["type"] = "not public"
+    published = entry.find("a:published", ATOM).text.strip()
+    return {"arxiv": arxiv, "version": version, "latest": latest,
+            "title": " ".join(entry.find("a:title", ATOM).text.split()),
+            "authors": [a.find("a:name", ATOM).text for a in entry.findall("a:author", ATOM)],
+            "first_published": published[:10], "yymm": published[2:4] + published[5:7],
+            "pdf": {"path": str(pdf_path), "sha256": sha256(pdf_path)}, "source": source}
 
 
 def crop_pdf(source: Path, page: int, box: list[float], output: Path,
@@ -655,6 +828,15 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-side", type=int, default=1600)
     p.add_argument("--prefix", default="sheet")
     p.add_argument("--format", default="jpg", choices=["jpg", "png"])
+    p = sub.add_parser("status", help="Mode, stage and progress of every paper under an output root")
+    p.add_argument("root", type=Path, nargs="?", default=Path("."))
+    p = sub.add_parser("clean", help="Remove tmp/ and LaTeX leftovers from a paper's work directory")
+    p.add_argument("work_dir", type=Path)
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("fetch", help="Download an arXiv PDF and the source of the same version")
+    p.add_argument("arxiv", help="Identifier or link, e.g. 1706.03762 or https://arxiv.org/abs/1706.03762v7")
+    p.add_argument("--version", type=int)
+    p.add_argument("--output-root", required=True, type=Path)
     p = sub.add_parser("compare", help="Compare an English build with the original PDF page by page")
     p.add_argument("original", type=Path)
     p.add_argument("built", type=Path)
@@ -695,6 +877,12 @@ def main() -> int:
         elif args.command == "sheet":
             cols = args.cols if args.cols is not None else min(2, args.per)
             result = make_sheets(args.images, args.output_dir, args.per, cols, args.max_side, args.prefix, args.format)
+        elif args.command == "status":
+            result = status(args.root)
+        elif args.command == "clean":
+            result = clean(args.work_dir, args.dry_run)
+        elif args.command == "fetch":
+            result = fetch(args.arxiv, args.output_root, args.version)
         elif args.command == "compare":
             result = compare_pdfs(args.original, args.built, args.threshold, args.window)
         elif args.command == "review-sheet":
