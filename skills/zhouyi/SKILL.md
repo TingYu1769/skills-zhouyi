@@ -3,7 +3,7 @@ name: zhouyi
 description: 将英文论文完整翻译成中文：有同版本 arXiv LaTeX 源码时翻译源码并用 XeLaTeX 编出中文 PDF，否则从本地 PDF 译成中文 Markdown 并从原页裁剪图表、逐张视觉复核。保留公式、引用与附录。适用于论文全文英译中、排版好的中文 PDF 和已有翻译任务的续作。
 license: MIT
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # 周译
