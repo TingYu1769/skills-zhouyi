@@ -454,6 +454,27 @@ class TexTest(unittest.TestCase):
         self.assertEqual(len(zt.split_file("sections/y.tex", text, False, 14000, warnings=warnings)), 2)
         self.assertIn("do not balance (+1)", warnings[0])
 
+    def test_chunk_hints_point_at_missing_numbers_paragraphs_and_english(self):
+        src = ("⟦P1⟧{Results (Main Results)}\nIn 2024 we ran 3 trials over 1,000 tasks and the model "
+               "was right 42 times.\n\nA second paragraph follows here.\n")
+        good = "⟦P1⟧{结果（Main Results）}\n2024 年我们在 1000 个任务上做了 3 次试验，模型答对 42 次。\n\n后面还有第二段。\n"
+        self.assertEqual(zt.chunk_hints(src, good), [])
+        bad = ("⟦P1⟧{结果（Main Results）}\n2024 年我们在 1000 个任务上做了试验，the model was right "
+               "forty two times in every single trial run。后面还有第二段。\n")
+        hints = zt.chunk_hints(src, bad)
+        self.assertTrue(any("numbers missing" in h and "3" in h and "42" in h for h in hints), hints)
+        self.assertTrue(any("1 paragraphs, the source has 2" in h for h in hints), hints)
+        self.assertTrue(any("English run" in h for h in hints), hints)
+
+    def test_merge_reports_hints_without_rejecting(self):
+        chunks, src = self.split()
+        method = next(c["id"] for c in chunks if c["title"] == "Method")
+        left = "\nthis sentence was simply left in English by the translator\n"
+        (self.work / f"chunks/{method}.zh.tex").write_text(src[method].rstrip("\n") + left)
+        result = zt.merge(self.work)
+        self.assertIn(method, result["merged"])
+        self.assertTrue(any("English run" in h for h in result["hints"][method]), result["hints"])
+
     def test_merge_rejects_lost_duplicated_or_invented_placeholders(self):
         chunks, src = self.split()
         cid = next(c["id"] for c in chunks if c["title"] == "Method")

@@ -8,6 +8,7 @@ restore the translations, add Chinese support and build with XeLaTeX."""
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import json
 import os
@@ -602,6 +603,34 @@ def check_chunk(src: str, zh: str, holders: dict, match_source: bool = False) ->
     return problems
 
 
+NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+ENGLISH_RUN = re.compile(r"(?:[A-Za-z][A-Za-z'’-]*[ \t\n,;:]+){7,}[A-Za-z][A-Za-z'’-]*")
+
+
+def chunk_hints(src: str, zh: str) -> list[str]:
+    """What a careful reader would check first, for the agent to look at; never a reason to reject:
+    numbers of the source missing from the translation, a different paragraph count, and runs of
+    eight or more English words left outside placeholders and outside full-width brackets."""
+    src_prose, zh_prose = PLACEHOLDER.sub(" ", src), PLACEHOLDER.sub(" ", zh)
+    hints = []
+    def numbers(text: str) -> collections.Counter:  # 1,000 = 1000 and 09/2025 = 2025 年 9 月
+        return collections.Counter(n.replace(",", "").lstrip("0") or "0" for n in NUMBER.findall(text))
+    have = numbers(zh_prose)
+    missing = []
+    for number, count in numbers(src_prose).items():
+        missing += [number] * max(0, count - have[number])
+    if missing:
+        hints.append(f"numbers missing from the translation: {', '.join(missing[:10])}")
+    paragraphs = [len([b for b in re.split(r"\n\s*\n", text) if b.strip()]) for text in (src, zh)]
+    if paragraphs[0] != paragraphs[1]:
+        hints.append(f"{paragraphs[1]} paragraphs, the source has {paragraphs[0]}")
+    bare = re.sub(r"（[^（）]*）", " ", zh_prose)
+    runs = [m[0] for m in ENGLISH_RUN.finditer(bare)]
+    if runs:
+        hints.append(f"{len(runs)} English run(s) of 8+ words left, e.g. {runs[0][:60]!r}")
+    return hints
+
+
 def restore(zh: str, holders: dict) -> str:
     """Put the kept spans back. A span ending in a control word gets a space before a following
     letter: XeTeX treats CJK characters as letters, so \\xspace我们 would read as one command name."""
@@ -652,7 +681,7 @@ def merge(work_dir: Path) -> dict:
                            "restore it and put fixes in W/overrides/")
     index = meta["chunks"]
     reverted = read_json(chunks_dir / "reverted.json") if (chunks_dir / "reverted.json").exists() else {}
-    used, problems, placed = [], {}, {}
+    used, problems, placed, hints = [], {}, {}, {}
     per_file: dict[str, list] = {}
     for c in index:
         zh_path = chunks_dir / f"{c['id']}.zh.tex"
@@ -670,6 +699,9 @@ def merge(work_dir: Path) -> dict:
         restored = restore(zh, holders)
         per_file.setdefault(c["file"], []).append((c["start"], c["end"], restored, c["id"]))
         used.append(c["id"])
+        found = chunk_hints(read_text(chunks_dir / f"{c['id']}.src.tex"), zh)
+        if found:
+            hints[c["id"]] = found
     for rel in record["tex_files"]:
         text = read_text(src / rel)
         spans = sorted(per_file.get(rel, []))
@@ -686,7 +718,7 @@ def merge(work_dir: Path) -> dict:
     write_json(chunks_dir / "merged.json", placed)
     overrides = apply_overrides(work_dir)
     return {"merged": used, "rejected": problems, "reverted": sorted(set(reverted) - set(used)),
-            "overrides": overrides}
+            "overrides": overrides, "hints": hints}
 
 
 def locate(work_dir: Path, rel: str, line: int, main: str) -> str | None:
