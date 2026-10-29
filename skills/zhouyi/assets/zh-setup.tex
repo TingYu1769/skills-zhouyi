@@ -50,3 +50,52 @@
   \renewcommand{\tablename}{表}%
   \renewcommand{\abstractname}{摘要（Abstract）}%
 }
+
+% Labels that packages print by themselves: algorithm names and keywords, proofs, contents,
+% appendix, cleveref names. begindocument/end runs after every package's and the template's own
+% \AtBeginDocument code, so these names win over names set there.
+\makeatletter
+\newcommand\zhouyi@set[2]{\ifdefined#1\renewcommand#1{#2}\fi}
+\AddToHook{begindocument/end}{%
+  \@ifpackageloaded{algorithm}{\floatname{algorithm}{算法}}{}%
+  \zhouyi@set\listalgorithmname{算法目录}%
+  \zhouyi@set\algorithmicrequire{\textbf{输入：}}%
+  \zhouyi@set\algorithmicensure{\textbf{输出：}}%
+  \zhouyi@set\algorithmicreturn{\textbf{返回}}%
+  \zhouyi@set\algorithmicif{\textbf{如果}}%
+  \zhouyi@set\algorithmicthen{\textbf{则}}%
+  \zhouyi@set\algorithmicelse{\textbf{否则}}%
+  \zhouyi@set\algorithmicelsif{\textbf{否则如果}}%
+  \zhouyi@set\algorithmicfor{\textbf{对于}}%
+  \zhouyi@set\algorithmicforall{\textbf{对所有}}%
+  \zhouyi@set\algorithmicdo{\textbf{执行}}%
+  \zhouyi@set\algorithmicwhile{\textbf{当}}%
+  \zhouyi@set\algorithmicrepeat{\textbf{重复}}%
+  \zhouyi@set\algorithmicuntil{\textbf{直到}}%
+  \zhouyi@set\algorithmicloop{\textbf{循环}}%
+  \zhouyi@set\algorithmicfunction{\textbf{函数}}%
+  \zhouyi@set\algorithmicprocedure{\textbf{过程}}%
+  \zhouyi@set\algorithmicend{\textbf{结束}}%
+  \@ifpackageloaded{algpseudocode}{%
+    \algrenewtext{EndFor}{\textbf{结束循环}}\algrenewtext{EndWhile}{\textbf{结束循环}}%
+    \algrenewtext{EndLoop}{\textbf{结束循环}}\algrenewtext{EndIf}{\textbf{结束判断}}%
+    \algrenewtext{EndFunction}{\textbf{结束函数}}\algrenewtext{EndProcedure}{\textbf{结束过程}}}{}%
+  \zhouyi@set\proofname{证明}%
+  \zhouyi@set\contentsname{目录（Contents）}%
+  \zhouyi@set\appendixname{附录}%
+  \@ifpackageloaded{cleveref}{%
+    \crefname{figure}{图}{图}\Crefname{figure}{图}{图}%
+    \crefname{table}{表}{表}\Crefname{table}{表}{表}%
+    \crefname{equation}{式}{式}\Crefname{equation}{式}{式}%
+    \crefname{algorithm}{算法}{算法}\Crefname{algorithm}{算法}{算法}%
+    \crefname{appendix}{附录}{附录}\Crefname{appendix}{附录}{附录}%
+    \crefformat{section}{第~#2#1#3~节}\Crefformat{section}{第~#2#1#3~节}%
+    \crefformat{subsection}{第~#2#1#3~节}\Crefformat{subsection}{第~#2#1#3~节}%
+    \crefname{theorem}{定理}{定理}\crefname{lemma}{引理}{引理}%
+    \crefname{corollary}{推论}{推论}\crefname{proposition}{命题}{命题}%
+    \crefname{definition}{定义}{定义}\crefname{remark}{注}{注}\crefname{example}{例}{例}%
+    \renewcommand\crefpairconjunction{和}\renewcommand\crefmiddleconjunction{、}%
+    \renewcommand\creflastconjunction{和}\renewcommand\crefrangeconjunction{至}%
+  }{}%
+}
+\makeatother

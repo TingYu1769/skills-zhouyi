@@ -46,6 +46,13 @@ LISTED_FONTS = {"times": "rm sf tt", "mathptmx": "rm sf tt", "helvet": "sf", "tg
                 "zlmtt": "ttlmmono", "fontenc": "", "inputenc": ""}
 DROPPED = re.compile(rf"{re.escape(MARK)} dropped ([\w,.-]+)")
 NO_MATH = "\\PassOptionsToPackage{no-math}{fontspec}"
+# Display names given to \newtheorem in the preamble, which no package setting can reach; the
+# build copy gets the Chinese name, as with the font lines. Unknown names stay as they are.
+THEOREM_NAMES = {"Theorem": "定理", "Lemma": "引理", "Proposition": "命题", "Corollary": "推论",
+                 "Definition": "定义", "Assumption": "假设", "Remark": "注", "Example": "例", "Claim": "断言",
+                 "Conjecture": "猜想", "Hypothesis": "假说", "Fact": "事实", "Property": "性质",
+                 "Condition": "条件", "Observation": "观察", "Problem": "问题", "Note": "注"}
+THEOREM_LINE = re.compile(r"(\\newtheorem\*?\s*\{[^{}]+\}\s*(?:\[[^\]]*\]\s*)?\{)(" + "|".join(THEOREM_NAMES) + r")(\})")
 
 
 class TexError(ValueError):
@@ -723,6 +730,13 @@ def patch_fonts(text: str, where: str, changes: list[str], families: set[str]) -
     return text
 
 
+def patch_theorem_names(text: str, where: str, changes: list[str]) -> str:
+    def name(m: re.Match) -> str:
+        changes.append(f"name {m[2]} {THEOREM_NAMES[m[2]]}{where}")
+        return f"{m[1]}{THEOREM_NAMES[m[2]]}{m[3]}"
+    return THEOREM_LINE.sub(lambda m: m[0] if in_comment(text, m.start()) else name(m), text)
+
+
 def patch_main(build: Path, main: str) -> list[str]:
     """Comment out clashing font lines in the main file and in the source's other .tex, .cls and
     .sty files, keep fontspec away from the template's math fonts, then insert zh-setup.tex after
@@ -734,11 +748,11 @@ def patch_main(build: Path, main: str) -> list[str]:
         rel = other.relative_to(build).as_posix()
         if other.suffix in (".tex", ".cls", ".sty") and rel != main and (src / rel).is_file():
             text = read_text(other)
-            patched = patch_fonts(text, f" in {rel}", changes, families)
+            patched = patch_theorem_names(patch_fonts(text, f" in {rel}", changes, families), f" in {rel}", changes)
             if patched != text:
                 other.write_text(patched, encoding="utf-8", errors="surrogateescape")
     path = build / main
-    text = patch_fonts(read_text(path), "", changes, families)
+    text = patch_theorem_names(patch_fonts(read_text(path), "", changes, families), "", changes)
     line = rf"^[ \t]*(?:{re.escape(NO_MATH)})?\\documentclass(\[[^\]]*\])?\{{[^}}]+\}}[^\n]*\n"
     match = re.search(line, text, re.M)
     if not match:

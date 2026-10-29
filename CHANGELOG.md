@@ -4,6 +4,9 @@
 
 ## 未发布
 
+源码模式的改动：
+
+- `zh-setup.tex` 预置宏包自己印出的标签的中文：算法浮动体名与 algorithmic/algpseudocode 关键词、证明、目录、附录、cleveref 引用名；`tex-build` 把导言区 `\newtheorem` 的常见英文显示名换成中文。以前每篇都要在 overrides 里手改。
 ## 0.2.0（2026-10-28）
 
 源码模式的改动：

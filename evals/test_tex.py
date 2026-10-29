@@ -17,6 +17,7 @@ spec.loader.exec_module(zt)
 # Set ZHOUYI_TEXBIN to a TeX Live bin directory to run the build tests.
 TEXBIN = Path(os.environ["ZHOUYI_TEXBIN"]) if os.environ.get("ZHOUYI_TEXBIN") else None
 HAS_TEX = bool(shutil.which("latexmk", path=str(TEXBIN) if TEXBIN else None))
+HAS_PYMUPDF = importlib.util.find_spec("pymupdf") is not None
 
 MAIN = r"""\pdfoutput=1
 \documentclass[twocolumn]{article}
@@ -261,6 +262,45 @@ class TexTest(unittest.TestCase):
         kept = [text[a:b] for kind, a, b in segs if kind == "keep"]
         self.assertTrue(any(k.startswith("\\begin{tabular}") and k.endswith("\\end{tabular}") for k in kept), kept)
         self.assertIn("After the table.", "".join(text[a:b] for kind, a, b in segs if kind == "text"))
+
+    def test_theorem_names_in_the_preamble_become_chinese_in_the_build_copy(self):
+        main = ("\\documentclass{article}\n\\usepackage{amsthm}\n\\newtheorem{theorem}{Theorem}[section]\n"
+                "\\newtheorem{lem}[theorem]{Lemma}\n\\newtheorem*{rem}{Remark}\n% \\newtheorem{old}{Theorem}\n"
+                "\\newtheorem{gadget}{Gadget}\n\\begin{document}\nText.\n\\end{document}\n")
+        tarball = make_tarball(self.root / "thm.tar.gz", {"main.tex": main})
+        work = self.root / "thm-work"
+        zt.prepare(tarball, work)
+        changes = zt.patch_main(work / "build", "main.tex")
+        text = (work / "build/main.tex").read_text()
+        for line in ("\\newtheorem{theorem}{定理}[section]", "\\newtheorem{lem}[theorem]{引理}",
+                     "\\newtheorem*{rem}{注}", "% \\newtheorem{old}{Theorem}", "\\newtheorem{gadget}{Gadget}"):
+            self.assertIn(line, text)
+        self.assertIn("name Theorem 定理", changes)
+        self.assertEqual(text.count("\n"), main.count("\n") + 1)
+        self.assertEqual(zt.patch_main(work / "build", "main.tex"), [])
+
+    @unittest.skipUnless(HAS_TEX and HAS_PYMUPDF, "set ZHOUYI_TEXBIN and install PyMuPDF")
+    def test_labels_printed_by_packages_come_out_in_chinese(self):
+        main = ("\\documentclass{article}\n\\usepackage{algorithm}\n\\usepackage{algpseudocode}\n"
+                "\\usepackage{amsthm}\n\\usepackage{cleveref}\n\\newtheorem{theorem}{Theorem}\n"
+                "\\begin{document}\n\\section{Intro}\\label{sec:a}\n"
+                "\\begin{figure}[h]\\centering\\fbox{A}\\caption{One.}\\label{fig:a}\\end{figure}\n"
+                "\\begin{figure}[h]\\centering\\fbox{B}\\caption{Two.}\\label{fig:b}\\end{figure}\n"
+                "See \\cref{fig:a,fig:b} and \\cref{sec:a}.\n"
+                "\\begin{theorem}\\label{thm:a}Statement.\\end{theorem}\n\\begin{proof}Done.\\end{proof}\n"
+                "\\begin{algorithm}[h]\\caption{Loop}\\begin{algorithmic}[1]\n\\Require $x$\n\\Ensure $y$\n"
+                "\\For{$i$}\\State step\\EndFor\n\\State \\Return $y$\n\\end{algorithmic}\\end{algorithm}\n"
+                "\\end{document}\n")
+        self.tarball = make_tarball(self.root / "labels.src.tar.gz", {"main.tex": main})
+        chunks, src = self.split()
+        for cid, text in src.items():
+            (self.work / f"chunks/{cid}.zh.tex").write_text(text)
+        summary = zt.build(self.work, None, TEXBIN)
+        self.assertTrue(summary["ok"], summary)
+        import pymupdf
+        pdf_text = "".join("".join(p.get_text().split()) for p in pymupdf.open(summary["pdf"]))
+        for label in ("算法1", "输入：", "输出：", "对于", "结束循环", "返回", "定理1", "证明", "图1和2", "第1节"):
+            self.assertIn(label, pdf_text)
 
     def test_commented_headings_do_not_name_a_chunk(self):
         text = ("\\documentclass{article}\n\\begin{document}\nIntro text.\n"
