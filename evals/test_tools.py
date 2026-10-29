@@ -106,7 +106,8 @@ class ToolsTest(unittest.TestCase):
         z.write_json(tex / "tex.json", {"main": "main.tex", "tex_files": ["main.tex"]})
         z.write_json(tex / "chunks" / "index.json", {"chunks": [{"id": "c01"}, {"id": "c02"}]})
         (tex / "chunks" / "c01.zh.tex").write_text("译文")
-        z.write_json(tex / "progress.json", {"mode": "tex", "issues": [{"status": "open"}, {"status": "noted"}]})
+        z.write_json(tex / "progress.json", {"mode": "tex", "issues": [{"status": "open"}, {"status": "noted"},
+                                                                    {"status": "resolved", "category": "漏译"}]})
         (tex / "tools" / "gen.py").write_text("# rebuild overrides/main.tex after editing c03\nprint()\n")
         (tex / "tools" / "__pycache__").mkdir()
         pdf = root / ".zhouyi" / "2601_arXiv_B"
@@ -118,6 +119,7 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(a["tools"], [{"path": "gen.py", "note": "rebuild overrides/main.tex after editing c03"}])
         self.assertEqual((b["modes"], b["stage"], b["progress"]), (["pdf"], "translating", "1/2 sections verified"))
         self.assertLess(a["minutes_ago"], 5)
+        self.assertEqual(a["issues_by_category"], {"漏译": 1})
 
     def test_clean_removes_tmp_and_build_leftovers_only(self):
         work = self.root / ".zhouyi" / "2601_arXiv_A"

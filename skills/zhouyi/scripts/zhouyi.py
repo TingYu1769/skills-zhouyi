@@ -399,6 +399,11 @@ def paper_status(root: Path, pid: str) -> dict:
             entry["progress"] = f"{done}/{len(sections)} sections verified"
             entry["stage"] = ("delivered" if (paper / f"{pid}.md").is_file() and state.get("document_review", {}).get("status") == "verified"
                               else "translating" if sections else "inspected")
+    categories: collections.Counter = collections.Counter()
+    for record in (tex / "progress.json", work / "progress.json"):
+        if record.is_file():
+            categories.update(i["category"] for i in read_json(record).get("issues", []) if i.get("category"))
+    entry["issues_by_category"] = dict(categories)
     changed = last_change(work)
     entry.update(last_activity=datetime.fromtimestamp(changed, timezone.utc).isoformat(timespec="seconds"),
                  minutes_ago=int((time.time() - changed) // 60), size_mb=round(tree_size(work) / 2**20, 1),
