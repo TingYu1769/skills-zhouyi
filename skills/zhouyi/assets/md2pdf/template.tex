@@ -1,0 +1,145 @@
+% Zhouyi: typesets a PDF-mode Chinese Markdown with pandoc (used with filter.lua by zhouyi.py md2pdf).
+\documentclass[UTF8,a4paper,fontset=none,zihao=5]{ctexart}
+\usepackage[a4paper,left=2.6cm,right=2.6cm,top=2.6cm,bottom=2.5cm,headheight=14pt]{geometry}
+
+% Fonts: TeX Gyre for Latin, Noto CJK SC for Chinese; emphasis and translator notes in Kaiti
+% when AR PL UKai is installed, otherwise a slanted Song face.
+\setmainfont{texgyretermes}[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic]
+\setsansfont{texgyreheros}[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic]
+\setmonofont{Noto Sans Mono CJK SC}[Scale=0.86]
+\IfFontExistsTF{AR PL UKai CN}
+  {\setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold,ItalicFont=AR PL UKai CN,BoldItalicFont=AR PL UKai CN,BoldItalicFeatures={FakeBold=2}]
+   \newCJKfontfamily\kaiti{AR PL UKai CN}[BoldFont=AR PL UKai CN,BoldFeatures={FakeBold=2}]}
+  {\setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold,AutoFakeSlant]
+   \newCJKfontfamily\kaiti{Noto Serif CJK SC}[AutoFakeSlant]}
+\setCJKsansfont{Noto Sans CJK SC}[BoldFont=Noto Sans CJK SC Bold]
+\setCJKmonofont{Noto Sans Mono CJK SC}[Scale=0.86]
+
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\definecolor{ink}{HTML}{1F2937}
+\definecolor{muted}{HTML}{6B7280}
+\definecolor{rule}{HTML}{CBD5E1}
+\definecolor{yzC}{HTML}{B7791F}
+\definecolor{yzF}{HTML}{FBF7EE}
+\definecolor{codeF}{HTML}{F6F7F9}
+
+\usepackage{graphicx}
+\graphicspath{{$resource-dir$/}}
+\usepackage{longtable,booktabs,array,calc,etoolbox}
+\usepackage{caption}
+\captionsetup{font={small,color=ink},skip=6pt}
+\usepackage{flafter}
+\usepackage[section,above,below]{placeins}
+\usepackage{needspace}
+\usepackage{multicol}
+\usepackage[titles]{tocloft}
+\setlength{\cftbeforesecskip}{3pt plus 1pt}
+\setlength{\cftbeforesubsecskip}{0pt}
+\renewcommand{\cftsecfont}{\sffamily\bfseries}
+\renewcommand{\cftsecpagefont}{\sffamily\bfseries}
+\setlength{\cftsubsecindent}{1.2em}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt,parsep=0pt}
+\usepackage{fancyhdr}
+\usepackage[most]{tcolorbox}
+\usepackage{fvextra}
+\usepackage{xurl}
+\usepackage[hidelinks,pdftitle={$pdf-title$}]{hyperref}
+\urlstyle{same}
+
+\linespread{1.3}
+\setlength{\emergencystretch}{4em}
+\setlength{\parskip}{0.25em}
+\raggedbottom
+\clubpenalty=10000
+\widowpenalty=10000
+\displaywidowpenalty=10000
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% Start a new page when too little room is left (first a legal break point, then measure)
+\makeatletter
+\newcommand{\needpage}[1]{\par\penalty\z@
+  \begingroup\dimen@=\pagegoal\advance\dimen@-\pagetotal
+  \ifdim\dimen@<#1\relax\newpage\fi\endgroup}
+\makeatother
+
+% Headings carry their own numbers, so no automatic numbering; a section starts a new page
+% only when less than a quarter page is left
+\setcounter{secnumdepth}{-1}
+\setcounter{tocdepth}{2}
+\newcommand{\headingen}[1]{\hspace{0.4em}{\mdseries\color{muted}\normalsize （#1）}}
+\ctexset{
+  section = {format = \Large\sffamily\bfseries\color{ink}\raggedright,
+             beforeskip = 2.4ex plus .5ex, afterskip = 1.4ex,
+             break = \needpage{0.25\textheight}},
+  subsection = {format = \large\sffamily\bfseries\color{ink}\raggedright,
+                beforeskip = 2ex plus .4ex, afterskip = 1ex,
+                break = \needpage{7\baselineskip}},
+  subsubsection = {format = \normalsize\sffamily\bfseries\color{ink}\raggedright,
+                   beforeskip = 1.6ex plus .3ex, afterskip = .6ex,
+                   break = \needpage{5\baselineskip}},
+}
+
+% Floats
+\setlength{\textfloatsep}{14pt plus 4pt minus 2pt}
+\setlength{\floatsep}{12pt plus 3pt minus 2pt}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.6}
+\renewcommand{\textfraction}{0.08}
+\renewcommand{\floatpagefraction}{0.75}
+\makeatletter\setlength{\@fptop}{0pt}\setlength{\@fpsep}{\floatsep}\setlength{\@fpbot}{0pt plus 1fil}\makeatother
+\setcounter{topnumber}{3}
+\setcounter{totalnumber}{4}
+
+% Tables
+\renewcommand{\arraystretch}{1.25}
+\AtBeginEnvironment{longtable}{\small}
+\setlength{\LTpre}{8pt}
+\setlength{\LTpost}{8pt}
+
+% Code blocks: breakable, thin rule on the left
+\let\verbatim\relax\let\endverbatim\relax
+\DefineVerbatimEnvironment{verbatim}{Verbatim}{breaklines,breakanywhere,breaksymbolleft={},breaksymbolright={},
+  fontsize=\small,frame=leftline,framerule=1.2pt,rulecolor=\color{rule},framesep=6pt,xleftmargin=4pt,
+  breakanywheresymbolpre={},breakbeforesymbolpre={},breakaftersymbolpre={},formatcom=\color{ink}}
+
+% Translator notes: Kaiti on a warm background with a coloured left rule, may break across pages
+\newtcolorbox{yizhubox}{enhanced,breakable,frame hidden,sharp corners,
+  borderline west={2pt}{0pt}{yzC},colback=yzF,left=10pt,right=8pt,top=5pt,bottom=5pt,boxsep=0pt,
+  before skip=8pt plus 2pt,after skip=10pt plus 2pt,parbox=false,fontupper=\kaiti,
+  before upper={\setlength{\parindent}{0pt}\setlength{\parskip}{3pt}%
+    {\sffamily\bfseries\small\color{yzC}译注}\par\vspace{2pt}}}
+% Other block quotes
+\newtcolorbox{quotebox}{enhanced,breakable,frame hidden,sharp corners,
+  borderline west={1.2pt}{0pt}{rule},colback=white,left=10pt,right=6pt,top=1pt,bottom=1pt,boxsep=0pt,
+  before skip=6pt,after skip=6pt,parbox=false,before upper={\setlength{\parindent}{0pt}}}
+% Footnote paragraphs and references
+\newenvironment{fnpara}{\par\footnotesize\color{ink}\noindent\ignorespaces}{\par\smallskip}
+\newenvironment{refs}{\par\small\setlength{\parindent}{0pt}\setlength{\parskip}{3pt}%
+  \everypar{\hangindent=1.5em\hangafter=1}}{\par}
+
+% Paper title, from the Markdown's level-1 heading (filter.lua): Chinese title, English below.
+\newcommand{\zhouyiheader}{}
+\newcommand{\papertitle}[2]{\gdef\zhouyiheader{#1}%
+  {\centering\sffamily\bfseries\LARGE\color{ink}#1\par
+   \ifx\relax#2\relax\else\vspace{0.6ex}{\mdseries\large\color{muted}#2\par}\fi}\vspace{2ex}}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}\zhouyiheader}
+\fancyhead[R]{\small\sffamily\color{muted}\rightmark}
+\fancyfoot[C]{\small\sffamily\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{{\color{rule}\hrule width\headwidth height\headrulewidth}}
+\renewcommand{\sectionmark}[1]{\markright{#1}}
+\renewcommand{\subsectionmark}[1]{}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\sffamily\color{muted}\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+\begin{document}
+\thispagestyle{plain}
+
+$body$
+
+\end{document}

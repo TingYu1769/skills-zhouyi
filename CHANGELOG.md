@@ -4,12 +4,17 @@
 
 ## 未发布
 
+PDF 模式的改动：
+
+- 新增 `zhouyi.py md2pdf`：用 pandoc 和 XeLaTeX 把交付的 Markdown 排成中文 PDF，不调模型；`check`、`pack` 接受这个可选文件，`preflight.py --tex` 增加可选的 pandoc 检查。
+
 源码模式的改动：
 
 - `zh-setup.tex` 预置宏包自己印出的标签的中文：算法浮动体名与 algorithmic/algpseudocode 关键词、证明、目录、附录、cleveref 引用名；`tex-build` 把导言区 `\newtheorem` 的常见英文显示名换成中文。以前每篇都要在 overrides 里手改。
 - `tex-merge` 为每个通过的块给出核对提示（缺失的数字、段落数差、残留的英文长句），只提示不拒收。以前每篇都自写核对脚本。
 - 新增 `zhouyi.py compare`：英文底稿与原 PDF 逐页比对文字覆盖率，并报出两边的正文主字体、页数和只在底稿里出现的字符，只需打开标出的页。新增 `zhouyi.py review-sheet`：把首页和编译日志里有超宽溢出、缺字的页拼成一张图，版面核对只看这一张。以前要逐页看图。
 - 新增 `zhouyi.py fetch`（按 arXiv 编号或链接下载 PDF 和同版本源码，分别报告源码类型）、`status`（各篇的模式、阶段、进度、未决问题、最后活动时间、占用空间）和 `clean`（删除 `tmp/` 和编译中间文件）。工作目录约定 `tmp/` 放可删的预览与比对结果，`tools/` 放自写脚本。
+
 ## 0.2.0（2026-10-28）
 
 源码模式的改动：

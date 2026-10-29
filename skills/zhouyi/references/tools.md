@@ -127,6 +127,14 @@ uv run scripts/zhouyi.py review-sheet reading/202601.arXiv.Example/202601.arXiv.
 
 ## 校验与打包
 
+PDF 模式在核对完 Markdown 之后，可以先排出中文 PDF：
+
+```bash
+uv run scripts/zhouyi.py md2pdf reading/202601.arXiv.Example --texbin /path/to/texlive/bin/x86_64-linux
+```
+
+`md2pdf` 用 pandoc（2.0 及以上，`assets/md2pdf/` 里的模板和过滤器）生成 LaTeX，XeLaTeX 编两遍，输出 `<名>.zh.pdf` 到论文目录，编译目录在工作目录的 `tmp/md2pdf/`。返回页数、缺字数和超宽溢出数；编译失败时报出日志里的第一条错误和行号，常见原因是 Markdown 里有没放进 `$...$` 的公式。`check` 和 `pack` 接受这个可选文件。
+
 ```bash
 uv run scripts/zhouyi.py check reading/202601.arXiv.Example \
   --source papers/example.pdf

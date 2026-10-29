@@ -44,6 +44,9 @@ def check_tex(add, texbin=None):
     # Kaiti for Chinese emphasis is optional; zh-setup.tex falls back to a slanted Song face.
     checks_note = "found" if "AR PL UKai CN" in families else "absent; Chinese emphasis will be slanted Song"
     add("font_kaiti_optional", True, checks_note)
+    # pandoc is optional too: only the typeset PDF of the PDF mode (zhouyi.py md2pdf) needs it.
+    pandoc = shutil.which("pandoc")
+    add("pandoc_optional", True, pandoc or "absent; the PDF mode will deliver Markdown without the typeset PDF")
 
 
 def check_environment(pdf=None, output_root=None, tex=False, texbin=None):

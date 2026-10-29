@@ -1,6 +1,7 @@
 """Behavioral tests for PDF identity, pixel crops, recovery and portable delivery."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -13,6 +14,9 @@ import pymupdf
 from PIL import Image, ImageChops
 
 from make_fixture import make_fixture
+
+TEXBIN = Path(os.environ["ZHOUYI_TEXBIN"]) if os.environ.get("ZHOUYI_TEXBIN") else None
+HAS_TEX = bool(shutil.which("xelatex", path=str(TEXBIN) if TEXBIN else None))
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/zhouyi/scripts/zhouyi.py"
 spec = importlib.util.spec_from_file_location("zhouyi", SCRIPT)
@@ -180,6 +184,21 @@ class ToolsTest(unittest.TestCase):
         finally:
             z.ARXIV_API, z.ARXIV_SITE = old
             server.shutdown()
+
+    @unittest.skipUnless(HAS_TEX and shutil.which("pandoc"), "set ZHOUYI_TEXBIN and install pandoc")
+    def test_md2pdf_typesets_the_markdown_and_check_accepts_it(self):
+        Image.new("RGB", (900, 300), "white").save(self.paper / "assets" / "fig_01.png", dpi=(300, 300))
+        (self.paper / f"{self.pid}.md").write_text(
+            "# 示例论文（An Example Paper）\n\n## 摘要（Abstract）\n\n这是一段摘要<sup>1</sup>。\n\n"
+            "![图 1](assets/fig_01.png)\n\n*图 1：示例图注。*\n\n**1** 脚注的说明文字。\n", encoding="utf-8")
+        result = z.md2pdf(self.paper, self.work, TEXBIN)
+        self.assertEqual(result["missing_characters"], 0)
+        import pymupdf as _p
+        text = "".join("".join(page.get_text().split()) for page in _p.open(result["pdf"]))
+        for piece in ("示例论文", "AnExamplePaper", "摘要", "图1", "示例图注", "脚注的说明文字"):
+            self.assertIn(piece, text)
+        self.assertTrue((self.work / "tmp" / "md2pdf").is_dir())
+        self.assertNotIn(f"{self.pid}.zh.pdf", " ".join(z.check_delivery(self.paper)["errors"]))
 
     def test_inspection_detects_rotation_scan_and_preserves_progress(self):
         info = z.inspect_pdf(self.source, self.work)

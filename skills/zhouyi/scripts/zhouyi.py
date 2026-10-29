@@ -19,6 +19,7 @@ import os
 from pathlib import Path, PureWindowsPath
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -504,6 +505,52 @@ def fetch(ref: str, root: Path, version: int | None = None) -> dict:
             "pdf": {"path": str(pdf_path), "sha256": sha256(pdf_path)}, "source": source}
 
 
+MD2PDF = Path(__file__).resolve().parent.parent / "assets" / "md2pdf"
+
+
+def md2pdf(paper_dir: Path, work_dir: Path | None = None, texbin: Path | None = None,
+           pandoc: str | None = None) -> dict:
+    """Typeset <ID>.md and assets/ into <ID>.zh.pdf: pandoc (filter.lua, template.tex) writes the
+    LaTeX, XeLaTeX compiles it twice; no model call. The build happens in the work directory's tmp/."""
+    paper_dir = Path(paper_dir).resolve()
+    md = paper_dir / f"{paper_dir.name}.md"
+    if not md.is_file():
+        raise ZhouyiError(f"Missing Markdown: {md}")
+    pandoc = pandoc or shutil.which("pandoc")
+    xelatex = shutil.which("xelatex", path=str(texbin) if texbin else None)
+    if not pandoc or not xelatex:
+        raise ZhouyiError("md2pdf needs pandoc (2.0 or later) and XeLaTeX; deliver the Markdown without the PDF and say so")
+    work_dir = Path(work_dir) if work_dir else paper_dir.parent / ".zhouyi" / paper_dir.name
+    build = work_dir / "tmp" / "md2pdf"
+    build.mkdir(parents=True, exist_ok=True)
+    tex = build / f"{paper_dir.name}.zh.tex"
+    title = next((l[2:].strip() for l in md.read_text(encoding="utf-8").splitlines() if l.startswith("# ")), paper_dir.name)
+    subprocess.run([pandoc, md.name, "-f", "markdown-smart-auto_identifiers-implicit_figures", "-t", "latex",
+                    "--template", str(MD2PDF / "template.tex"), "--lua-filter", str(MD2PDF / "filter.lua"),
+                    "--no-highlight", "--columns=20", "-V", f"resource-dir={paper_dir}",
+                    "-V", f"pdf-title={title}", "-o", str(tex)], cwd=paper_dir, check=True, capture_output=True)
+    env = dict(os.environ)
+    if texbin:
+        env["PATH"] = f"{texbin}{os.pathsep}{env.get('PATH', '')}"
+    for _ in range(2):  # the second run settles page references and the header marks
+        run = subprocess.run([xelatex, "-interaction=nonstopmode", "-halt-on-error", tex.name], cwd=build,
+                             env=env, capture_output=True, text=True, errors="replace", timeout=1800)
+        if run.returncode:
+            log = tex.with_suffix(".log").read_text(encoding="utf-8", errors="replace").splitlines()
+            first = next((i for i, l in enumerate(log) if l.startswith("!")), None)
+            where = " / ".join(l.strip() for l in log[first:first + 4] if l.strip()) if first is not None else ""
+            raise ZhouyiError(f"XeLaTeX failed: {where[:300]} (log: {tex.with_suffix('.log')}); usually a defect in "
+                              "the Markdown such as math outside $...$; fix it, or deliver without the PDF and say so")
+    log = tex.with_suffix(".log").read_text(encoding="utf-8", errors="replace")
+    out = paper_dir / f"{paper_dir.name}.zh.pdf"
+    shutil.copyfile(tex.with_suffix(".pdf"), out)
+    with open_pdf(out) as doc:
+        pages = doc.page_count
+    return {"pdf": str(out), "pages": pages, "log": str(tex.with_suffix(".log")),
+            "missing_characters": len(re.findall(r"^Missing character: There is no", log, re.M)),
+            "overfull_over_20pt": sum(1 for x in re.findall(r"^Overfull \\hbox \(([\d.]+)pt too wide", log, re.M) if float(x) > 20)}
+
+
 def crop_pdf(source: Path, page: int, box: list[float], output: Path,
              work_dir: Path, dpi: int = 300, object_id: str | None = None) -> dict:
     if len(box) != 4 or not all(math.isfinite(x) for x in box):
@@ -682,7 +729,7 @@ def check_delivery(paper_dir: Path, source: Path | None = None, work_dir: Path |
         # An existing naming convention at the output root may take precedence.
         warnings.append("Directory name is not YYYYMM.Venue.ShortName")
     md, pdf = root / f"{root.name}.md", root / f"{root.name}.pdf"
-    expected = {md.name, pdf.name, "assets", *(allow_extra or [])}
+    expected = {md.name, pdf.name, f"{root.name}.zh.pdf", "assets", *(allow_extra or [])}  # .zh.pdf: optional, from md2pdf
     for path in root.iterdir():
         if path.name not in expected:
             errors.append(f"Move working files outside the delivery directory: {path.name}")
@@ -837,6 +884,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("arxiv", help="Identifier or link, e.g. 1706.03762 or https://arxiv.org/abs/1706.03762v7")
     p.add_argument("--version", type=int)
     p.add_argument("--output-root", required=True, type=Path)
+    p = sub.add_parser("md2pdf", help="Typeset the delivered Markdown into <ID>.zh.pdf with pandoc and XeLaTeX")
+    p.add_argument("paper_dir", type=Path)
+    p.add_argument("--work-dir", type=Path, help="Default: <root>/.zhouyi/<ID>")
+    p.add_argument("--texbin", type=Path, help="Directory holding xelatex")
+    p.add_argument("--pandoc")
     p = sub.add_parser("compare", help="Compare an English build with the original PDF page by page")
     p.add_argument("original", type=Path)
     p.add_argument("built", type=Path)
@@ -883,6 +935,8 @@ def main() -> int:
             result = clean(args.work_dir, args.dry_run)
         elif args.command == "fetch":
             result = fetch(args.arxiv, args.output_root, args.version)
+        elif args.command == "md2pdf":
+            result = md2pdf(args.paper_dir, args.work_dir, args.texbin, args.pandoc)
         elif args.command == "compare":
             result = compare_pdfs(args.original, args.built, args.threshold, args.window)
         elif args.command == "review-sheet":
