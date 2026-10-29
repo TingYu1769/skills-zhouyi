@@ -56,6 +56,16 @@ uv run scripts/zhouyi.py sheet reading/202601.arXiv.Example/assets/*.png \
 
 裁剪记录由工具写入，包含来源哈希、页码、归一化区域、实际像素区域、DPI、尺寸及图片哈希。多段截图使用相同的 `--object-id` 和不同文件名。
 
+两个只看结果、不必逐页看图的命令：
+
+```bash
+uv run scripts/zhouyi.py compare papers/example.pdf W/build/main.pdf
+uv run scripts/zhouyi.py review-sheet reading/202601.arXiv.Example/202601.arXiv.Example.zh.pdf \
+  --output-dir W/tmp/review --log W/build/main.log
+```
+
+`compare` 用于开译前：逐页给出原版文字在底稿相邻两页里的覆盖率，列出低于 `--threshold`（默认 0.85）的页，并报出两边的页数、正文主字体和只在底稿里出现的字符。`review-sheet` 用于交付前：把首页和日志里有超宽溢出、缺字的页拼成一张图，最多 `--max-pages` 页（默认 8）。
+
 ## 填写进度
 
 `progress.json` 是 agent 可编辑的工作记录。保留工具生成的 `schema_version`、`source` 和裁剪来源字段，按实际工作更新下面内容。

@@ -17,6 +17,9 @@ from pathlib import Path, PureWindowsPath
 import re
 import sys
 import tempfile
+import unicodedata
+import difflib
+import collections
 from urllib.parse import unquote, urlsplit
 import zipfile
 
@@ -235,6 +238,97 @@ def make_sheets(images: list[Path], output_dir: Path, per: int = 4, cols: int = 
         sheets.append({"path": str(output), "width": canvas.width, "height": canvas.height,
                        "members": [str(p) for p in group]})
     return sheets
+
+
+def page_texts(source: Path) -> list[str]:
+    """Each page's text in a comparable form: NFKC (ligatures, full-width forms), no line-break
+    hyphens, no whitespace."""
+    with open_pdf(source) as doc:
+        texts = [doc[i].get_text() for i in range(doc.page_count)]
+    return ["".join(unicodedata.normalize("NFKC", re.sub(r"-\n", "", t)).split()) for t in texts]
+
+
+def main_fonts(source: Path, top: int = 3) -> list[dict]:
+    """The fonts that set the most characters: a build that fell back to a default font (for
+    example Latin Modern instead of a Times clone) shows up here even when its text is identical."""
+    counts: collections.Counter = collections.Counter()
+    with open_pdf(source) as doc:
+        for page in doc:
+            for block in page.get_text("dict")["blocks"]:
+                for line in block.get("lines", []):
+                    for span in line["spans"]:
+                        counts[span["font"]] += len(span["text"].strip())
+    total = sum(counts.values()) or 1
+    return [{"font": f, "share": round(n / total, 3)} for f, n in counts.most_common(top)]
+
+
+def compare_pdfs(original: Path, built: Path, threshold: float = 0.85, window: int = 2) -> dict:
+    """Page-by-page text check of an English build against the original PDF, before translating.
+    For each original page, `coverage` is the share of its text found in the best pair of
+    consecutive built pages within `window` pages, so floats that moved or text that flowed onto
+    the next page do not count. Characters that appear only in the build, apart from Chinese
+    labels, usually mean a wrong font or glyph."""
+    a, b = page_texts(original), page_texts(built)
+    pages = []
+    for i, text in enumerate(a):
+        best = (0.0, None)
+        for j in range(max(0, i - window), min(len(b), i + window + 1)):
+            joined = b[j] + (b[j + 1] if j + 1 < len(b) else "")
+            if not text:
+                best = max(best, (1.0, j)); continue
+            m = difflib.SequenceMatcher(None, text, joined, autojunk=False)
+            if m.quick_ratio() * (len(text) + len(joined)) / 2 / len(text) < best[0]:
+                continue  # cannot beat the best pair so far
+            best = max(best, (sum(block.size for block in m.get_matching_blocks()) / len(text), j))
+        pages.append({"page": i + 1, "match": None if best[1] is None else best[1] + 1, "coverage": round(best[0], 3)})
+    seen = set("".join(a))
+    only_built = collections.Counter(c for c in "".join(b) if c not in seen and not re.match(r"[\u3000-\u9fff\uff00-\uffef]", c))
+    return {"pages": {"original": len(a), "built": len(b)},
+            "main_fonts": {"original": main_fonts(original), "built": main_fonts(built)},
+            "flagged": [p for p in pages if p["coverage"] < threshold],
+            "new_characters": dict(only_built.most_common(20)),
+            "per_page": pages}
+
+
+SHIPOUT = re.compile(r"(?<![\w.])\[(\d+)(?=[\s\]{<]|$)")
+
+
+def log_problem_pages(log: str) -> dict[int, set[str]]:
+    """Pages of overfull boxes past 20pt and missing glyphs, read from the TeX log by counting
+    page shipouts ([1], [2] ...) seen before each message."""
+    found: dict[int, set[str]] = collections.defaultdict(set)
+    current = 1
+    for line in log.splitlines():
+        m = re.match(r"Overfull \\(h|v)box \(([\d.]+)pt too (wide|high)\)", line)
+        if m and float(m[2]) > 20:
+            found[current].add("overfull")
+        if line.startswith("Missing character: There is no"):
+            found[current].add("missing glyph")
+        for shipped in SHIPOUT.findall(line):
+            current = int(shipped) + 1
+    return found
+
+
+def review_sheet(pdf: Path, output_dir: Path, log: Path | None = None, max_pages: int = 8) -> dict:
+    """One contact sheet of the pages worth a look before delivery: the first page and the pages
+    with overfull boxes or missing glyphs in the TeX log. Untranslated text is caught earlier, by
+    the per-chunk hints of tex-merge."""
+    with open_pdf(pdf) as doc:
+        count = doc.page_count
+    reasons: dict[int, set[str]] = collections.defaultdict(set)
+    reasons[1].add("first page")
+    if log is not None:
+        for page, why in log_problem_pages(Path(log).read_text(encoding="utf-8", errors="replace")).items():
+            if 1 <= page <= count:
+                reasons[page] |= why
+    chosen = sorted(reasons, key=lambda p: (p != 1, -len(reasons[p]), p))[:max_pages]
+    chosen.sort()
+    output_dir = Path(output_dir)
+    rendered = render_pdf(pdf, ",".join(map(str, chosen)), output_dir / "pages", 80)
+    sheets = make_sheets([Path(r["path"]) for r in rendered], output_dir, per=len(chosen),
+                         cols=min(3, len(chosen)), max_side=2000, prefix="review")
+    return {"page_count": count, "pages": [{"page": p, "reasons": sorted(reasons[p])} for p in chosen],
+            "not_shown": max(0, len(reasons) - len(chosen)), "sheets": sheets}
 
 
 def crop_pdf(source: Path, page: int, box: list[float], output: Path,
@@ -561,6 +655,16 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-side", type=int, default=1600)
     p.add_argument("--prefix", default="sheet")
     p.add_argument("--format", default="jpg", choices=["jpg", "png"])
+    p = sub.add_parser("compare", help="Compare an English build with the original PDF page by page")
+    p.add_argument("original", type=Path)
+    p.add_argument("built", type=Path)
+    p.add_argument("--threshold", type=float, default=0.85)
+    p.add_argument("--window", type=int, default=2)
+    p = sub.add_parser("review-sheet", help="One contact sheet of the pages worth a look before delivery")
+    p.add_argument("pdf", type=Path)
+    p.add_argument("--output-dir", required=True, type=Path)
+    p.add_argument("--log", type=Path, help="TeX log, for pages with overfull boxes or missing glyphs")
+    p.add_argument("--max-pages", type=int, default=8)
     for command in ["check", "pack"]:
         p = sub.add_parser(command, help="Check delivery files and review records" if command == "check" else "Validate and package a reviewed delivery")
         p.add_argument("paper_dir", type=Path)
@@ -591,6 +695,10 @@ def main() -> int:
         elif args.command == "sheet":
             cols = args.cols if args.cols is not None else min(2, args.per)
             result = make_sheets(args.images, args.output_dir, args.per, cols, args.max_side, args.prefix, args.format)
+        elif args.command == "compare":
+            result = compare_pdfs(args.original, args.built, args.threshold, args.window)
+        elif args.command == "review-sheet":
+            result = review_sheet(args.pdf, args.output_dir, args.log, args.max_pages)
         elif args.command == "check":
             result = check_delivery(args.paper_dir, args.source, args.work_dir, args.allow_extra)
         else:

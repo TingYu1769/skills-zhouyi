@@ -62,6 +62,38 @@ class ToolsTest(unittest.TestCase):
                                      "note": "Synthetic document review for tests."}
         self.save(state)
 
+    def make_pdf(self, path, pages):
+        doc = pymupdf.open()
+        for text in pages:
+            page = doc.new_page()
+            page.insert_textbox(pymupdf.Rect(60, 60, 540, 780), text, fontname="china-s", fontsize=10)
+        doc.save(path)
+        return path
+
+    def test_compare_flags_changed_pages_new_glyphs_and_page_count(self):
+        words = ["alpha beta gamma delta epsilon zeta eta theta " * 12, "iota kappa lambda mu nu xi omicron pi " * 12,
+                 "rho sigma tau upsilon phi chi psi omega " * 12]
+        original = self.make_pdf(self.root / "orig.pdf", words)
+        built = self.make_pdf(self.root / "built.pdf", [words[0], "completely different words on this page " * 12,
+                                                         words[2].replace("omega", "omega ±"), "spill over"])
+        result = z.compare_pdfs(original, built)
+        self.assertEqual(result["pages"], {"original": 3, "built": 4})
+        self.assertEqual([p["page"] for p in result["flagged"]], [2])
+        self.assertIn("±", result["new_characters"])  # a glyph the original never had
+        self.assertEqual(result["main_fonts"]["original"][0]["font"], result["main_fonts"]["built"][0]["font"])
+
+    def test_review_sheet_shows_first_page_and_pages_named_in_the_log(self):
+        pdf = self.make_pdf(self.root / "zh.pdf", ["第一页", "第二页", "第三页", "第四页"])
+        log = self.root / "main.log"
+        log.write_text("[1] [2]\nOverfull \\hbox (25.3pt too wide) in paragraph at lines 10--12\n"
+                       "Overfull \\hbox (3.1pt too wide) in paragraph at lines 13--14\n[3]\n"
+                       "Missing character: There is no X in font foo!\n[4]\n")
+        result = z.review_sheet(pdf, self.root / "review", log)
+        self.assertEqual({p["page"]: p["reasons"] for p in result["pages"]},
+                         {1: ["first page"], 3: ["overfull"], 4: ["missing glyph"]})
+        self.assertEqual(len(result["sheets"]), 1)
+        self.assertTrue(Path(result["sheets"][0]["path"]).is_file())
+
     def test_inspection_detects_rotation_scan_and_preserves_progress(self):
         info = z.inspect_pdf(self.source, self.work)
         self.assertEqual(info["source"]["page_count"], 4)
