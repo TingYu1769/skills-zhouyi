@@ -121,7 +121,7 @@ uv run scripts/zhouyi.py review-sheet reading/202601.arXiv.Example/202601.arXiv.
 
 这段内容写入该图的 `visual_review`。重裁会自动将对应复核状态恢复为 `pending`。
 
-`issues` 中每条问题包含 `location`、`detail`、`status`。待处理用 `open`，解决后用 `resolved`。原 PDF 自身模糊、已按约定保留图注等可明确交付的限制用 `noted`，最终回复说明位置。待辨认正文仍用 `open`。
+`issues` 中每条问题包含 `location`、`detail`、`status`；核对中发现并改正的译文问题另写 `category`（漏译、误译、术语不一致、数字或符号、限定语或否定、格式或编译），`status` 命令按类别汇总。待处理用 `open`，解决后用 `resolved`。原 PDF 自身模糊、已按约定保留图注等可明确交付的限制用 `noted`，最终回复说明位置。待辨认正文仍用 `open`。
 
 最终全文核对后，填写 `document_review.status` 为 `verified`，`note` 说明实际核对范围，并把 `check` 返回的 `markdown_sha256` 写入 `document_review.markdown_sha256`。之后修改 Markdown，需要重新核对受影响内容并更新该哈希。
 

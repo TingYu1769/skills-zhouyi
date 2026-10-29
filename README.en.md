@@ -54,6 +54,16 @@ python3 skills/zhouyi/scripts/preflight.py --tex
 
 Missing capabilities or dependencies are reported with a way to resolve them. See [environment setup](skills/zhouyi/references/environment.md) for virtual environments, Windows paths, offline use, and TeX.
 
+## Opening and defaults
+
+After the environment check, Zhouyi tells the user in a few lines how this paper will be handled: what the environment supports, which mode the paper takes and why, which options can be changed, and the size of the text with an estimated time. The first paper in an output directory gets the full version; later papers get one line.
+
+Unstated choices take the defaults: source mode whenever a matching source is available, the whole paper including appendices, resume saved progress, no subagents, prompt boxes and table cells left as in the original, intermediate files cleaned after delivery. Zhouyi stops to ask only when no output directory is given, the source mode cannot work, dependencies or network access need permission, the time runs past 1.5 times the estimate, or another session has just changed the same paper. The user's choices are kept in the host's own memory and reused. See [Opening and defaults](skills/zhouyi/references/onboarding.md) (in Chinese).
+
+## Using different hosts
+
+Zhouyi needs only file access, command execution, and image viewing. How Claude Code, Codex, Cursor, and Gemini CLI differ in memory, network access, image viewing, and subagents, and the recommended split between models, are described in [Using different hosts](skills/zhouyi/references/hosts.md) (in Chinese). Check spending with the host's own command, such as `/usage` in Claude Code or `/status` in Codex.
+
 ## Installation
 
 Install with the [skills CLI](https://github.com/vercel-labs/skills):
@@ -85,6 +95,12 @@ Resume the Example translation under reading/ from its saved progress
 and complete the whole paper.
 ```
 
+```text
+Use $zhouyi to translate arXiv 1706.03762 into Chinese under reading/.
+```
+
+Given only an arXiv identifier or link, Zhouyi downloads the PDF and the source of the same version.
+
 Folders use `YYYYMM.Venue.ShortName` by default: the first public month, the confirmed conference or journal, and the paper's short name. Preprints use `arXiv`. The agent checks local metadata first and consults official sources when needed; an output root with its own naming convention keeps that convention.
 
 ## Output
@@ -96,6 +112,7 @@ reading/
 ├── 202601.arXiv.Example/
 │   ├── 202601.arXiv.Example.md
 │   ├── 202601.arXiv.Example.pdf
+│   ├── 202601.arXiv.Example.zh.pdf    # when pandoc and XeLaTeX are available
 │   └── assets/
 │       ├── fig_01.png
 │       ├── table_01.png
@@ -122,6 +139,7 @@ The PDF is copied byte for byte, and relative image paths keep the folder portab
 - **Original-page captures (PDF mode).** Figures and tables are rendered and cropped directly from the supplied PDF. The agent opens every image and compares legends, edge labels, final rows, and footnotes against the source. Objects spanning pages are saved in order.
 - **Copyable algorithms and prompts (PDF mode).** Original screenshots come with Chinese text, retaining variables, placeholders, protocol tags, and executable code.
 - **Merge checks and fallback (source mode).** Each chunk's placeholders and braces are checked before merging. When a translated chunk breaks the build, that chunk falls back to English and its section returns to pending until it is fixed and merged again.
+- **Two checkpoints only.** The agent stops to judge twice: before translating, on the comparison of the English build with the original PDF, and before delivery, on one sheet of suspect pages. Per-chunk hints, Chinese labels for package output, status, and cleaning are done by tools, so there is no page-by-page viewing and no hand-written checking script.
 - **Resumable work.** Section progress and terminology are saved. The agent verifies the source before continuing unfinished sections.
 
 ## Development and evaluation

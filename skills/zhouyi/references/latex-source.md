@@ -6,7 +6,7 @@
 
 arXiv 源码地址是 `https://arxiv.org/e-print/<编号>v<版本>`，返回 `.tar.gz`。版本以输入 PDF 首页的戳记为准（例如 `arXiv:1706.03762v7`），不要取最新版本，二者的正文可能不同。输出根目录另有原文登记工具时，用它下载并登记。
 
-源码包只有 PDF、没有 `.tex`，或者版本对不上时，改用 PDF 模式。
+源码包只有 PDF、没有 `.tex`，或者版本对不上时，改用 PDF 模式。TeX 不可用，或英文底稿编不过且修不好时，停下来请用户在“改走 PDF 模式”“先修环境”“放弃”之间选。
 
 ## 环境
 
@@ -29,7 +29,7 @@ arXiv 源码地址是 `https://arxiv.org/e-print/<编号>v<版本>`，返回 `.t
 6. `zhouyi_tex.py tex-build --work-dir W`：合并后编译。某块的译文导致编译失败时，脚本把这一块退回英文重编，该节改回 `pending`，并在 `issues` 里开一条记录；失败的译稿留在原处，修好后再编译会自动重新合并。以下情况脚本不退回，停下交给 agent：报错落在译文之外；报错行与源码原文一字不差且不含中文（例如 override 或导言区的钩子在 `\begin{document}`、`\maketitle` 处出错）；日志里没有文件和行号。之前的退回事后查明是误判时，修好真正的原因，用 `tex-build --retry-reverted` 重新合并退回的块，再把对应 issue 标为 resolved、各节重新核对。
 7. 版面核对：运行 `zhouyi.py review-sheet <中文 PDF> --output-dir W/tmp/review --log W/build/<主文件>.log`，它把首页和日志里有超宽溢出、缺字的页拼成一张图，只看这一张：没有缺字方框，标题、图表和表注位置正常，表格没有溢出栏宽，强调用的楷体正常显示。漏译已由 `tex-merge` 的提示在逐块阶段处理；只有图上看出版式问题，或 `build-summary.json` 有异常时，才用 `render` 和 `sheet` 看更多页。`build-summary.json` 里的 `missing_characters` 必须为 0，`undefined_references`、`overfull_over_20pt`（横向溢出）和 `overfull_vbox_over_20pt`（文本框、表格越过页底）逐条看过。
 8. 核对只做一遍：每块写完后随即逐段对照原文核对（这时原文还在上下文里，标准同 [验收与恢复](verification.md)），发现问题当场改，之后不再整块重读原文和译文。全部合并编译后，只看 `tex-merge` 的结果、编译摘要和版面拼图，再抽查几段；没有问题时将各节设为 `verified`，疑点记入 `issues`，版面核对和抽查范围写进 `document_review`。用子代理时，逐段核对由子代理在本批完成并回报，主 agent 每批抽查一两段。不要在最后把全文再完整重读一遍：每轮请求都会重发上下文，整篇重读会让花费成倍增加，逐块写完即核对已经覆盖了这一步。
-9. `zhouyi_tex.py tex-deliver <论文目录> --work-dir W` 复制 `<论文目录名>.zh.pdf` 和 `zh-tex/`（源码的全部文件、`W/overrides/` 里的文件和 `zh-setup.tex`）；`zhouyi_tex.py tex-check <论文目录> --work-dir W` 返回 `ready: true` 后交付。
+9. `zhouyi_tex.py tex-deliver <论文目录> --work-dir W` 复制 `<论文目录名>.zh.pdf` 和 `zh-tex/`（源码的全部文件、`W/overrides/` 里的文件和 `zh-setup.tex`）；`zhouyi_tex.py tex-check <论文目录> --work-dir W` 返回 `ready: true` 后交付，再运行 `zhouyi.py clean` 清理中间产物（用户选择保留时跳过）。
 
 ## 块说明（翻译每一块时遵守；用子代理时原样交给它）
 
@@ -49,7 +49,7 @@ arXiv 源码地址是 `https://arxiv.org/e-print/<编号>v<版本>`，返回 `.t
 块里改不到的地方用 `W/overrides/` 修：按与 `W/build/` 相同的相对路径，放修改后的整个文件。每次合并之后，脚本把这些文件覆盖到 `W/build/` 上。从 `W/overrides/` 删掉的文件，下次合并时恢复成源码原样。交付时它们一并进入 `zh-tex/`，包括源码里没有的文件（如本地字体包替身）。改动记进 `progress.json` 的 `metadata`。
 
 - 不改 `W/src/`：切块之后它被改动，`tex-merge` 会报错停下，因为块的起止位置已经对不上。也不直接改 `W/build/` 里的 tex 文件，下一次合并会把它覆盖掉。
-- 尽量只覆盖需要改的小文件：类文件、宏包、导言区单独 `\input` 的宏文件和表格文件。不得不覆盖含有译块的 tex 文件时，用脚本从合并结果生成，并把脚本留在工作目录；之后改了译块，先删掉这份 override、重新合并，再运行脚本，否则旧副本会盖住新译文。
+- 尽量只覆盖需要改的小文件：类文件、宏包、导言区单独 `\input` 的宏文件和表格文件。不得不覆盖含有译块的 tex 文件时，用脚本从合并结果生成，脚本放在 `W/tools/`，第一行注释写明用途和何时要重跑；之后改了译块，先删掉这份 override、重新合并，再运行脚本，否则旧副本会盖住新译文。
 - 开始翻译前，先在主文件导言区、作者字段、类文件和外部文件里查一遍不会进入待译块的可见文字，随块翻译时一并写进 override，省得版面核对后再返工：环境可选参数里的文字（例如框标题 `title=...`）、被整体保护的宏参数里的图注（例如自定义宏里的 `\captionof`）、公式环境里的 `\intertext` 说明、模板类文件里写死的标签（例如直接写出的 `Abstract`，`zh-setup.tex` 改 `\abstractname` 管不到它，可在主文件的 override 里用 `\patchcmd` 改）、作者字段里的说明（Equal contribution、Corresponding author、Project leader）、导言区宏里的文字（例如 `\papertitle`、算法的 Input/Output 标签、algorithmic 的控制词），以及 `\lstinputlisting` 等引入的外部文件（例如附录里的提示词全文）。
 
 ## 已知限制
