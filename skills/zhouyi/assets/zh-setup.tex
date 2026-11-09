@@ -52,11 +52,14 @@
 }
 
 % Labels that packages print by themselves: algorithm names and keywords, proofs, contents,
-% appendix, cleveref names. begindocument/end runs after every package's and the template's own
+% appendix, cleveref names; and hyperref's link boxes, hidden. begindocument/end runs after every package's and the template's own
 % \AtBeginDocument code, so these names win over names set there.
 \makeatletter
 \newcommand\zhouyi@set[2]{\ifdefined#1\renewcommand#1{#2}\fi}
 \AddToHook{begindocument/end}{%
+  % Links stay clickable but draw no boxes: xdvipdfmx misplaces the box of a link broken
+  % across Chinese lines, and other PDF viewers then show stray lines through the text.
+  \@ifpackageloaded{hyperref}{\hypersetup{hidelinks}}{}%
   \@ifpackageloaded{algorithm}{\floatname{algorithm}{算法}}{}%
   \zhouyi@set\listalgorithmname{算法目录}%
   \zhouyi@set\algorithmicrequire{\textbf{输入：}}%
